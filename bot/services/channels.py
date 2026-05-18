@@ -16,10 +16,26 @@ async def add_channel(db_path: str, owner_telegram_id: int, channel_id: str, tit
         await db.commit()
 
 
-async def list_user_channels(db_path: str, owner_telegram_id: int):
+async def list_user_channels(db_path: str, owner_telegram_id: int, only_active: bool = True):
     async with aiosqlite.connect(db_path) as db:
-        cursor = await db.execute(
-            'SELECT channel_id, title, username, is_active FROM channels WHERE owner_telegram_id=? ORDER BY id DESC',
-            (owner_telegram_id,),
-        )
+        query = 'SELECT channel_id, title, username, is_active FROM channels WHERE owner_telegram_id=?'
+        if only_active:
+            query += ' AND is_active=1'
+        query += ' ORDER BY id DESC'
+        cursor = await db.execute(query, (owner_telegram_id,))
         return await cursor.fetchall()
+
+
+async def deactivate_channel(db_path: str, owner_telegram_id: int, channel_id: str) -> None:
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute('UPDATE channels SET is_active=0 WHERE owner_telegram_id=? AND channel_id=?', (owner_telegram_id, channel_id))
+        await db.commit()
+
+
+async def has_user_channel(db_path: str, owner_telegram_id: int, channel_id: str) -> bool:
+    async with aiosqlite.connect(db_path) as db:
+        row = await (await db.execute(
+            'SELECT 1 FROM channels WHERE owner_telegram_id=? AND channel_id=? AND is_active=1',
+            (owner_telegram_id, channel_id),
+        )).fetchone()
+        return bool(row)

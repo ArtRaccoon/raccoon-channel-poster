@@ -33,7 +33,8 @@ SCHEMA = [
         media_type TEXT,
         status TEXT DEFAULT 'draft',
         created_at TEXT,
-        published_at TEXT
+        published_at TEXT,
+        scheduled_at TEXT
     )
     ''',
     '''
@@ -50,8 +51,19 @@ SCHEMA = [
 ]
 
 
+async def _ensure_column(db, table: str, column: str, ddl: str) -> None:
+    cols = await (await db.execute(f'PRAGMA table_info({table})')).fetchall()
+    names = {c[1] for c in cols}
+    if column not in names:
+        await db.execute(ddl)
+
+
 async def init_db(path: str) -> None:
     async with aiosqlite.connect(path) as db:
         for stmt in SCHEMA:
             await db.execute(stmt)
+        await _ensure_column(db, 'posts', 'media_file_id', 'ALTER TABLE posts ADD COLUMN media_file_id TEXT')
+        await _ensure_column(db, 'posts', 'media_type', 'ALTER TABLE posts ADD COLUMN media_type TEXT')
+        await _ensure_column(db, 'posts', 'scheduled_at', 'ALTER TABLE posts ADD COLUMN scheduled_at TEXT')
+        await _ensure_column(db, 'channels', 'is_active', 'ALTER TABLE channels ADD COLUMN is_active INTEGER DEFAULT 1')
         await db.commit()

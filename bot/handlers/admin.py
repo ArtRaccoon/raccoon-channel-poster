@@ -1,4 +1,4 @@
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.types import Message
 
 from bot.services.stats import get_admin_stats, latest_channels, latest_users
@@ -10,19 +10,27 @@ def _is_owner(message: Message, config) -> bool:
     return message.from_user.id in config.owner_ids
 
 
+def _render_stats(s: dict) -> str:
+    top_channels = '\n'.join([f"{uid}: {cnt}" for uid, cnt in s['top_channels']]) or '-'
+    top_pubs = '\n'.join([f"{uid}: {cnt}" for uid, cnt in s['top_pubs']]) or '-'
+    return (
+        f"Всего пользователей: {s['total_users']}\nНовых за 24ч: {s['new_users_24h']}\nНовых за 7д: {s['new_users_7d']}\n"
+        f"Всего каналов: {s['total_channels']}\nАктивных: {s['active_channels']}\nОтключённых: {s['disabled_channels']}\n"
+        f"Всего постов: {s['total_posts']}\nЧерновики: {s['drafts']}\nЗапланированных: {s['scheduled']}\n"
+        f"Опубликованных: {s['published']}\nОшибок публикации: {s['failed']}\n"
+        f"Публикаций за 24ч: {s['published_24h']}\nПубликаций за 7д: {s['published_7d']}\n"
+        f"Топ-5 по каналам:\n{top_channels}\nТоп-5 по публикациям:\n{top_pubs}"
+    )
+
+
 @router.message(F.text == '📊 Статистика')
+@router.message(F.text == '📈 Отчёт за 24ч')
+@router.message(F.text == '📈 Отчёт за 7д')
 async def admin_stats(message: Message, config):
     if not _is_owner(message, config):
         return
     s = await get_admin_stats(config.database_path)
-    await message.answer(
-        f"Всего пользователей: {s['total_users']}\n"
-        f"Всего каналов: {s['total_channels']}\n"
-        f"Всего постов: {s['total_posts']}\n"
-        f"Опубликовано постов: {s['published_posts']}\n"
-        f"Ошибок публикации: {s['publish_errors']}\n"
-        f"Новых пользователей за 24ч: {s['new_users_24h']}"
-    )
+    await message.answer(_render_stats(s))
 
 
 @router.message(F.text == '👥 Пользователи')
