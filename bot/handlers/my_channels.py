@@ -28,7 +28,8 @@ async def show_channels(message: Message, config):
 async def delete_channel(call: CallbackQuery, config):
     channel_id = call.data.split(':', 1)[1]
     await deactivate_channel(config.database_path, call.from_user.id, channel_id)
-    await call.answer('Канал отключён')
+    await call.message.answer('Канал отключён. Откройте 📋 Мои каналы, чтобы увидеть актуальный список.')
+    await call.answer('Отключено')
 
 
 @router.callback_query(F.data.startswith('ch_check:'))

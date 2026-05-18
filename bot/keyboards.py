@@ -32,6 +32,7 @@ def post_actions_inline(post_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text='✅ Опубликовать', callback_data=f'post_publish:{post_id}')],
         [InlineKeyboardButton(text='✏️ Редактировать текст', callback_data=f'post_edit:{post_id}')],
+        [InlineKeyboardButton(text='📣 Выбрать канал', callback_data=f'post_choose_channel:{post_id}')],
         [InlineKeyboardButton(text='💾 Оставить в черновиках', callback_data=f'post_keep:{post_id}')],
         [InlineKeyboardButton(text='🕒 Запланировать', callback_data=f'post_schedule:{post_id}')],
         [InlineKeyboardButton(text='❌ Отменить', callback_data=f'post_cancel:{post_id}')],

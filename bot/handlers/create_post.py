@@ -86,6 +86,9 @@ async def choose_channel(call: CallbackQuery, config):
     if not post or post[1] != call.from_user.id:
         await call.answer('Нет доступа', show_alert=True)
         return
+    if not post[2]:
+        await call.answer('Сначала выберите канал для поста.', show_alert=True)
+        return
     if not await has_user_channel(config.database_path, call.from_user.id, channel_id):
         await call.answer('Канал недоступен', show_alert=True)
         return
@@ -131,10 +134,14 @@ async def open_draft(call: CallbackQuery, config):
     if not post or post[1] != call.from_user.id:
         await call.answer('Нет доступа', show_alert=True)
         return
+    if not post[2]:
+        await call.answer('Сначала выберите канал для поста.', show_alert=True)
+        return
     await call.answer()
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text='✅ Опубликовать', callback_data=f'post_publish:{post_id}')],
         [InlineKeyboardButton(text='✏️ Редактировать текст', callback_data=f'post_edit:{post_id}')],
+        [InlineKeyboardButton(text='📣 Выбрать канал', callback_data=f'post_choose_channel:{post_id}')],
         [InlineKeyboardButton(text='🗑 Удалить', callback_data=f'draft_delete:{post_id}')],
         [InlineKeyboardButton(text='⬅️ Назад', callback_data='draft_back')],
     ])
@@ -161,6 +168,9 @@ async def start_edit(call: CallbackQuery, state: FSMContext, config):
     if not post or post[1] != call.from_user.id:
         await call.answer('Нет доступа', show_alert=True)
         return
+    if not post[2]:
+        await call.answer('Сначала выберите канал для поста.', show_alert=True)
+        return
     await state.set_state(CreatePostState.waiting_edit_text)
     await state.update_data(edit_post_id=post_id)
     await call.answer()
@@ -185,14 +195,45 @@ async def apply_edit(message: Message, state: FSMContext, config):
     await _show_post_preview(message, updated)
 
 
+
+@router.callback_query(F.data.startswith('post_choose_channel:'))
+async def choose_channel_for_existing_draft(call: CallbackQuery, config):
+    post_id = int(call.data.split(':')[1])
+    post = await get_post(config.database_path, post_id)
+    if not post or post[1] != call.from_user.id:
+        await call.answer('Нет доступа', show_alert=True)
+        return
+    if not post[2]:
+        await call.answer('Сначала выберите канал для поста.', show_alert=True)
+        return
+    channels = await list_user_channels(config.database_path, call.from_user.id, only_active=True)
+    if not channels:
+        await call.answer('Нет активных каналов', show_alert=True)
+        return
+    buttons = [[InlineKeyboardButton(text=(title or channel_id), callback_data=f'ch_select:{post_id}:{channel_id}')] for channel_id, title, _, _ in channels]
+    await call.message.answer('Выберите канал:', reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await call.answer()
+
+
 @router.callback_query(F.data.startswith('post_keep:'))
 async def keep_draft(call: CallbackQuery):
     await call.answer('Оставлено в черновиках')
 
 
 @router.callback_query(F.data.startswith('post_cancel:'))
-async def cancel_post(call: CallbackQuery):
-    await call.answer('Отменено')
+async def cancel_post(call: CallbackQuery, config):
+    post_id = int(call.data.split(':')[1])
+    post = await get_post(config.database_path, post_id)
+    if not post or post[1] != call.from_user.id:
+        await call.answer('Нет доступа', show_alert=True)
+        return
+    if post[6] == 'draft':
+        await delete_draft(config.database_path, post_id, call.from_user.id)
+        await call.message.answer('Черновик удалён.')
+        await call.answer('Удалено')
+    else:
+        await call.message.answer('Пост уже нельзя отменить.')
+        await call.answer('Недоступно')
 
 
 @router.callback_query(F.data.startswith('post_schedule:'))
@@ -201,6 +242,9 @@ async def schedule_start(call: CallbackQuery, state: FSMContext, config):
     post = await get_post(config.database_path, post_id)
     if not post or post[1] != call.from_user.id:
         await call.answer('Нет доступа', show_alert=True)
+        return
+    if not post[2]:
+        await call.answer('Сначала выберите канал для поста.', show_alert=True)
         return
     await state.set_state(CreatePostState.waiting_schedule_at)
     await state.update_data(schedule_post_id=post_id)
@@ -233,8 +277,11 @@ async def publish_now(call: CallbackQuery, bot, config):
     if not post or post[1] != call.from_user.id:
         await call.answer('Нет доступа', show_alert=True)
         return
+    if not post[2]:
+        await call.answer('Сначала выберите канал для поста.', show_alert=True)
+        return
     if not post[2] or not await has_user_channel(config.database_path, call.from_user.id, str(post[2])):
-        await call.answer('Невалидный канал', show_alert=True)
+        await call.answer('Сначала выберите канал для поста.', show_alert=True)
         return
     try:
         if post[5] == 'photo':
