@@ -21,6 +21,10 @@ async def start_add_channel(message: Message, state: FSMContext):
 
 @router.message(AddChannelState.waiting_channel_ref)
 async def handle_channel_ref(message: Message, state: FSMContext, bot, config):
+    if not message.text:
+        await message.answer('Отправьте username канала текстом, например @my_channel.')
+        return
+
     channel_ref = message.text.strip()
     try:
         chat = await bot.get_chat(channel_ref)

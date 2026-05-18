@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import os
+import sys
 
 from aiogram import Bot, Dispatcher
 
@@ -9,12 +11,26 @@ from bot.handlers import add_channel, admin, create_post, help, my_channels, sta
 from bot.proxy import build_session
 
 
+def setup_logging(level_name: str) -> None:
+    os.makedirs('logs', exist_ok=True)
+    level = getattr(logging, level_name, logging.INFO)
+
+    logging.basicConfig(
+        level=level,
+        format='%(asctime)s | %(levelname)s | %(name)s | %(message)s',
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler('logs/bot.log', encoding='utf-8'),
+        ],
+    )
+
+
 async def main() -> None:
     config = load_config()
     if not config.bot_token:
         raise RuntimeError('BOT_TOKEN is not configured')
 
-    logging.basicConfig(level=getattr(logging, config.log_level, logging.INFO))
+    setup_logging(config.log_level)
 
     await init_db(config.database_path)
     session = build_session(config.proxy_url)
