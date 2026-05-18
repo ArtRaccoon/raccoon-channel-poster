@@ -32,7 +32,15 @@ async def receive_post_text(message: Message, state: FSMContext, config):
 
 @router.message(CreatePostState.waiting_channel)
 async def choose_channel(message: Message, state: FSMContext):
+    data = await state.get_data()
+    channels = data.get('channels', [])
+    allowed_channel_ids = {str(channel_id) for channel_id, *_ in channels}
+
     channel_id = message.text.split('|')[-1].strip() if '|' in message.text else message.text.strip()
+    if channel_id not in allowed_channel_ids:
+        await message.answer('Можно выбрать только канал из вашего списка. Попробуйте снова.')
+        return
+
     await state.update_data(channel_id=channel_id)
     await state.set_state(CreatePostState.waiting_action)
     kb = ReplyKeyboardMarkup(
