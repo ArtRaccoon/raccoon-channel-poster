@@ -86,9 +86,6 @@ async def choose_channel(call: CallbackQuery, config):
     if not post or post[1] != call.from_user.id:
         await call.answer('Нет доступа', show_alert=True)
         return
-    if not post[2]:
-        await call.answer('Сначала выберите канал для поста.', show_alert=True)
-        return
     if not await has_user_channel(config.database_path, call.from_user.id, channel_id):
         await call.answer('Канал недоступен', show_alert=True)
         return
@@ -134,17 +131,23 @@ async def open_draft(call: CallbackQuery, config):
     if not post or post[1] != call.from_user.id:
         await call.answer('Нет доступа', show_alert=True)
         return
-    if not post[2]:
-        await call.answer('Сначала выберите канал для поста.', show_alert=True)
-        return
     await call.answer()
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='✅ Опубликовать', callback_data=f'post_publish:{post_id}')],
-        [InlineKeyboardButton(text='✏️ Редактировать текст', callback_data=f'post_edit:{post_id}')],
-        [InlineKeyboardButton(text='📣 Выбрать канал', callback_data=f'post_choose_channel:{post_id}')],
-        [InlineKeyboardButton(text='🗑 Удалить', callback_data=f'draft_delete:{post_id}')],
-        [InlineKeyboardButton(text='⬅️ Назад', callback_data='draft_back')],
-    ])
+    if post[2]:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text='✅ Опубликовать', callback_data=f'post_publish:{post_id}')],
+            [InlineKeyboardButton(text='✏️ Редактировать текст', callback_data=f'post_edit:{post_id}')],
+            [InlineKeyboardButton(text='📣 Выбрать канал', callback_data=f'post_choose_channel:{post_id}')],
+            [InlineKeyboardButton(text='🕒 Запланировать', callback_data=f'post_schedule:{post_id}')],
+            [InlineKeyboardButton(text='🗑 Удалить', callback_data=f'draft_delete:{post_id}')],
+            [InlineKeyboardButton(text='⬅️ Назад', callback_data='draft_back')],
+        ])
+    else:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text='📣 Выбрать канал', callback_data=f'post_choose_channel:{post_id}')],
+            [InlineKeyboardButton(text='✏️ Редактировать текст', callback_data=f'post_edit:{post_id}')],
+            [InlineKeyboardButton(text='🗑 Удалить', callback_data=f'draft_delete:{post_id}')],
+            [InlineKeyboardButton(text='⬅️ Назад', callback_data='draft_back')],
+        ])
     await call.message.answer(f'Черновик #{post_id}\n{_preview(post[5], post[3])}', reply_markup=kb)
 
 
@@ -167,9 +170,6 @@ async def start_edit(call: CallbackQuery, state: FSMContext, config):
     post = await get_post(config.database_path, post_id)
     if not post or post[1] != call.from_user.id:
         await call.answer('Нет доступа', show_alert=True)
-        return
-    if not post[2]:
-        await call.answer('Сначала выберите канал для поста.', show_alert=True)
         return
     await state.set_state(CreatePostState.waiting_edit_text)
     await state.update_data(edit_post_id=post_id)
@@ -202,9 +202,6 @@ async def choose_channel_for_existing_draft(call: CallbackQuery, config):
     post = await get_post(config.database_path, post_id)
     if not post or post[1] != call.from_user.id:
         await call.answer('Нет доступа', show_alert=True)
-        return
-    if not post[2]:
-        await call.answer('Сначала выберите канал для поста.', show_alert=True)
         return
     channels = await list_user_channels(config.database_path, call.from_user.id, only_active=True)
     if not channels:
