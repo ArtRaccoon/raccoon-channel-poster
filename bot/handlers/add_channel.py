@@ -2,6 +2,7 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
+from bot.keyboards import user_menu
 from bot.services.channels import add_channel
 from bot.states import AddChannelState
 
@@ -58,4 +59,5 @@ async def handle_channel_ref(message: Message, state: FSMContext, bot, config):
 
     await add_channel(config.database_path, message.from_user.id, str(chat.id), chat.title, chat.username)
     await state.clear()
-    await message.answer('Канал добавлен.')
+    is_owner = message.from_user.id in config.owner_ids
+    await message.answer('Канал добавлен.', reply_markup=user_menu(is_owner))

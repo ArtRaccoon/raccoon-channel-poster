@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import sys
+from pathlib import Path
 
 from aiogram import Bot, Dispatcher
 
@@ -32,6 +33,7 @@ async def main() -> None:
 
     setup_logging(config.log_level)
 
+    Path(config.database_path).parent.mkdir(parents=True, exist_ok=True)
     await init_db(config.database_path)
     session = build_session(config.proxy_url)
     bot = Bot(token=config.bot_token, session=session)
