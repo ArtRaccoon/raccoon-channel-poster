@@ -6,6 +6,7 @@ class AddChannelState(StatesGroup):
 
 
 class CreatePostState(StatesGroup):
-    waiting_text = State()
+    waiting_content = State()
     waiting_channel = State()
-    waiting_action = State()
+    waiting_edit_text = State()
+    waiting_schedule_at = State()
