@@ -257,6 +257,10 @@ async def schedule_apply(message: Message, state: FSMContext, config):
     if not post or post[1] != message.from_user.id:
         await state.clear()
         return
+    if not post[2] or not await has_user_channel(config.database_path, message.from_user.id, str(post[2])):
+        await state.clear()
+        await message.answer('Канал для поста не выбран или уже отключён. Выберите канал заново.')
+        return
     try:
         dt = datetime.strptime(message.text.strip(), '%d.%m.%Y %H:%M').replace(tzinfo=ZoneInfo(config.timezone))
     except Exception:
