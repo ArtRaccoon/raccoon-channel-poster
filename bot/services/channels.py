@@ -39,3 +39,22 @@ async def has_user_channel(db_path: str, owner_telegram_id: int, channel_id: str
             (owner_telegram_id, channel_id),
         )).fetchone()
         return bool(row)
+
+
+async def get_channel_settings(db_path: str, owner_telegram_id: int, channel_id: str):
+    async with aiosqlite.connect(db_path) as db:
+        row = await (await db.execute(
+            "SELECT signature, default_buttons_json, channel_timezone FROM channels WHERE owner_telegram_id=? AND channel_id=? AND is_active=1",
+            (owner_telegram_id, channel_id),
+        )).fetchone()
+        if not row:
+            return None
+        return {"signature": row[0], "default_buttons_json": row[1], "channel_timezone": row[2]}
+
+
+async def update_channel_field(db_path: str, owner_telegram_id: int, channel_id: str, field: str, value: str | None):
+    if field not in {"signature", "default_buttons_json", "channel_timezone"}:
+        raise ValueError("unsupported field")
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(f"UPDATE channels SET {field}=? WHERE owner_telegram_id=? AND channel_id=?", (value, owner_telegram_id, channel_id))
+        await db.commit()

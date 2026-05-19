@@ -22,6 +22,7 @@ def admin_menu() -> ReplyKeyboardMarkup:
             [KeyboardButton(text='👥 Пользователи')],
             [KeyboardButton(text='📣 Каналы')],
             [KeyboardButton(text='🌐 Прокси-статус')],
+            [KeyboardButton(text='💾 Бэкап базы'), KeyboardButton(text='🚨 Ошибки')],
             [KeyboardButton(text='⬅️ Назад')],
         ],
         resize_keyboard=True,
