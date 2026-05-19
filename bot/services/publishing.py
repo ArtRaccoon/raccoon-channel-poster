@@ -5,7 +5,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMedia
 from aiohttp import ClientError
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramNetworkError
 
-from bot.services.channels import get_channel_settings
+from bot.services.channels import get_channel_settings, has_user_channel
 from bot.services.posts import CAPTION_LIMIT, TEXT_LIMIT, add_publish_log, get_post, set_post_status
 
 
@@ -27,6 +27,8 @@ def build_url_buttons_markup(buttons_json: str | None) -> InlineKeyboardMarkup |
 
 def validate_post_before_publish(post: tuple, signature: str | None) -> str | None:
     full_text = build_post_text_with_signature(post[3], signature)
+    if post[5] == 'text' and not full_text.strip():
+        return 'Текст поста не может быть пустым.'
     if post[5] in ('photo', 'album') and len(full_text) > CAPTION_LIMIT:
         return 'Подпись вместе с текстом превышает лимит Telegram 1024 символа для фото.'
     if post[5] == 'text' and len(full_text) > TEXT_LIMIT:
@@ -54,20 +56,29 @@ async def render_post_preview(bot, user_id: int, post: tuple, channel: dict[str,
         await bot.send_photo(user_id, post[4], caption=full_text or None, reply_markup=markup)
     elif post[5] == 'album' and post[11]:
         media_items = json.loads(post[11])
-        album = []
-        for i, item in enumerate(media_items):
-            album.append(InputMediaPhoto(media=item['file_id'], caption=full_text if i == 0 else None))
+        album = [InputMediaPhoto(media=item['file_id'], caption=full_text if i == 0 else None) for i, item in enumerate(media_items)]
         await bot.send_media_group(user_id, album)
         if markup:
             await bot.send_message(user_id, 'URL-кнопки для альбома:', reply_markup=markup)
     else:
-        await bot.send_message(user_id, full_text or '-', reply_markup=markup)
+        await bot.send_message(user_id, full_text, reply_markup=markup)
     return True, None
 
 
 async def publish_post(bot, db_path: str, post_id: int) -> tuple[bool, str]:
     post = await get_post(db_path, post_id)
-    channel = await get_channel_settings(db_path, post[1], post[2]) if post and post[2] else None
+    if not post:
+        return False, 'Пост не найден.'
+    if not post[2]:
+        await set_post_status(db_path, post_id, 'failed')
+        await add_publish_log(db_path, post[1], '', post_id, 'error', 'Post has no channel_id')
+        return False, 'Сначала выберите канал для поста.'
+    if not await has_user_channel(db_path, post[1], str(post[2])):
+        await set_post_status(db_path, post_id, 'failed')
+        await add_publish_log(db_path, post[1], str(post[2]), post_id, 'error', 'Channel is inactive or not owned by user')
+        return False, 'Не удалось опубликовать. Канал отключён или недоступен у пользователя.'
+
+    channel = await get_channel_settings(db_path, post[1], post[2])
     signature = channel.get('signature') if channel else None
     full_text = build_post_text_with_signature(post[3], signature)
     buttons_json = post[10] or (channel.get('default_buttons_json') if channel else None)
@@ -87,7 +98,7 @@ async def publish_post(bot, db_path: str, post_id: int) -> tuple[bool, str]:
             if markup:
                 await bot.send_message(post[2], 'Ссылки:', reply_markup=markup)
         else:
-            await bot.send_message(post[2], full_text or '-', reply_markup=markup)
+            await bot.send_message(post[2], full_text, reply_markup=markup)
         await set_post_status(db_path, post_id, 'published')
         await add_publish_log(db_path, post[1], post[2], post_id, 'success')
         return True, 'ok'

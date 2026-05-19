@@ -85,10 +85,33 @@ async def set_post_channel(db_path: str, post_id: int, channel_id: str) -> None:
 
 async def set_post_status(db_path: str, post_id: int, status: str, channel_id: str | None = None, scheduled_at: str | None = None) -> None:
     async with aiosqlite.connect(db_path) as db:
-        await db.execute(
-            'UPDATE posts SET status=?, channel_id=COALESCE(?, channel_id), scheduled_at=?, published_at=CASE WHEN ?="published" THEN ? ELSE published_at END WHERE id=?',
-            (status, channel_id, scheduled_at, status, _now(), post_id),
-        )
+        if status == 'scheduled':
+            if not scheduled_at:
+                raise ValueError('scheduled_at is required for scheduled status')
+            await db.execute(
+                'UPDATE posts SET status=?, channel_id=COALESCE(?, channel_id), scheduled_at=? WHERE id=?',
+                (status, channel_id, scheduled_at, post_id),
+            )
+        elif status == 'draft':
+            await db.execute(
+                'UPDATE posts SET status=?, channel_id=COALESCE(?, channel_id), scheduled_at=NULL WHERE id=?',
+                (status, channel_id, post_id),
+            )
+        elif status == 'published':
+            await db.execute(
+                'UPDATE posts SET status=?, channel_id=COALESCE(?, channel_id), published_at=?, scheduled_at=NULL WHERE id=?',
+                (status, channel_id, _now(), post_id),
+            )
+        elif status == 'failed':
+            await db.execute(
+                'UPDATE posts SET status=?, channel_id=COALESCE(?, channel_id) WHERE id=?',
+                (status, channel_id, post_id),
+            )
+        else:
+            await db.execute(
+                'UPDATE posts SET status=?, channel_id=COALESCE(?, channel_id) WHERE id=?',
+                (status, channel_id, post_id),
+            )
         await db.commit()
 
 

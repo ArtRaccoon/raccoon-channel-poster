@@ -10,7 +10,6 @@ from bot.services.channels import has_user_channel, list_user_channels
 from bot.services.publishing import publish_post, render_post_preview
 from bot.services.posts import (
     CAPTION_LIMIT,
-    add_publish_log,
     create_draft,
     delete_draft,
     get_post,
@@ -76,7 +75,7 @@ async def receive_post_content(message: Message, state: FSMContext, config):
     await state.update_data(post_id=post_id)
     await state.set_state(CreatePostState.waiting_channel)
 
-    buttons = [[InlineKeyboardButton(text=(title or channel_id), callback_data=f'ch_select:{post_id}:{channel_id}')] for channel_id, title, _, _ in channels]
+    buttons = [[InlineKeyboardButton(text=(title or channel_id), callback_data=f'ch_select:{post_id}:{channel_id}')] for channel_id, title, *_ in channels]
     await message.answer('Черновик создан. Выберите канал:', reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
 
 
@@ -215,7 +214,7 @@ async def choose_channel_for_existing_draft(call: CallbackQuery, config):
     if not channels:
         await call.answer('Нет активных каналов', show_alert=True)
         return
-    buttons = [[InlineKeyboardButton(text=(title or channel_id), callback_data=f'ch_select:{post_id}:{channel_id}')] for channel_id, title, _, _ in channels]
+    buttons = [[InlineKeyboardButton(text=(title or channel_id), callback_data=f'ch_select:{post_id}:{channel_id}')] for channel_id, title, *_ in channels]
     await call.message.answer('Выберите канал:', reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await call.answer()
 
