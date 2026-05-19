@@ -13,7 +13,8 @@ from bot.database import init_db
 from bot.handlers import add_channel, admin, create_post, help, my_channels, start, user_menu
 from bot.proxy import build_session
 from bot.services.channels import has_user_channel
-from bot.services.posts import CAPTION_LIMIT, add_publish_log, get_due_scheduled_posts, set_post_status
+from bot.services.publishing import publish_post
+from bot.services.posts import add_publish_log, get_due_scheduled_posts, set_post_status
 
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,8 @@ def setup_logging(level_name: str) -> None:
 async def process_scheduled_posts(bot: Bot, db_path: str) -> None:
     now = datetime.now(timezone.utc).isoformat()
     posts = await get_due_scheduled_posts(db_path, now)
-    for post_id, owner_id, channel_id, text, media_file_id, media_type in posts:
+    for post in posts:
+        post_id, owner_id, channel_id = post[0], post[1], post[2]
         if not channel_id:
             await set_post_status(db_path, post_id, 'failed')
             await add_publish_log(db_path, owner_id, '', post_id, 'error', 'Scheduled post has no channel_id')
@@ -37,19 +39,7 @@ async def process_scheduled_posts(bot: Bot, db_path: str) -> None:
             await set_post_status(db_path, post_id, 'failed')
             await add_publish_log(db_path, owner_id, str(channel_id), post_id, 'error', 'Channel is inactive or not owned by user')
             continue
-        try:
-            if media_type == 'photo':
-                if text and len(text) > CAPTION_LIMIT:
-                    raise ValueError('Подпись к фото не должна быть длиннее 1024 символов.')
-                await bot.send_photo(chat_id=channel_id, photo=media_file_id, caption=text or None)
-            else:
-                await bot.send_message(chat_id=channel_id, text=text or '')
-            await set_post_status(db_path, post_id, 'published')
-            await add_publish_log(db_path, owner_id, channel_id, post_id, 'success')
-        except Exception as exc:
-            logger.exception('Scheduled publish error for post_id=%s', post_id)
-            await set_post_status(db_path, post_id, 'failed')
-            await add_publish_log(db_path, owner_id, channel_id or '', post_id, 'error', str(exc))
+        await publish_post(db_path, bot, post)
 
 
 async def main() -> None:

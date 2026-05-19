@@ -20,6 +20,7 @@ SCHEMA = [
         username TEXT,
         is_active INTEGER DEFAULT 1,
         created_at TEXT,
+        signature TEXT,
         UNIQUE(owner_telegram_id, channel_id)
     )
     ''',
@@ -34,7 +35,8 @@ SCHEMA = [
         status TEXT DEFAULT 'draft',
         created_at TEXT,
         published_at TEXT,
-        scheduled_at TEXT
+        scheduled_at TEXT,
+        buttons_json TEXT
     )
     ''',
     '''
@@ -65,5 +67,7 @@ async def init_db(path: str) -> None:
         await _ensure_column(db, 'posts', 'media_file_id', 'ALTER TABLE posts ADD COLUMN media_file_id TEXT')
         await _ensure_column(db, 'posts', 'media_type', 'ALTER TABLE posts ADD COLUMN media_type TEXT')
         await _ensure_column(db, 'posts', 'scheduled_at', 'ALTER TABLE posts ADD COLUMN scheduled_at TEXT')
+        await _ensure_column(db, 'posts', 'buttons_json', 'ALTER TABLE posts ADD COLUMN buttons_json TEXT')
         await _ensure_column(db, 'channels', 'is_active', 'ALTER TABLE channels ADD COLUMN is_active INTEGER DEFAULT 1')
+        await _ensure_column(db, 'channels', 'signature', 'ALTER TABLE channels ADD COLUMN signature TEXT')
         await db.commit()

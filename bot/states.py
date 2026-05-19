@@ -10,3 +10,10 @@ class CreatePostState(StatesGroup):
     waiting_channel = State()
     waiting_edit_text = State()
     waiting_schedule_at = State()
+    waiting_buttons = State()
+    waiting_replace_photo = State()
+    waiting_search_query = State()
+
+
+class ChannelSignatureState(StatesGroup):
+    waiting_signature = State()

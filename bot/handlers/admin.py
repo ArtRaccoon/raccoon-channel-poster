@@ -1,6 +1,11 @@
-from aiogram import F, Router
-from aiogram.types import Message
+import shutil
+from datetime import datetime
+from pathlib import Path
 
+from aiogram import F, Router
+from aiogram.types import FSInputFile, Message
+
+from bot.services.posts import latest_publish_errors
 from bot.services.stats import get_admin_stats, latest_channels, latest_users
 
 router = Router()
@@ -21,6 +26,11 @@ def _render_stats(s: dict) -> str:
         f"Публикаций за 24ч: {s['published_24h']}\nПубликаций за 7д: {s['published_7d']}\n"
         f"Топ-5 по каналам:\n{top_channels}\nТоп-5 по публикациям:\n{top_pubs}"
     )
+
+
+def _short(text: str | None, limit: int = 120) -> str:
+    value = (text or '-').replace('\n', ' ')
+    return value if len(value) <= limit else f'{value[:limit - 3]}...'
 
 
 @router.message(F.text == '📊 Статистика')
@@ -52,6 +62,39 @@ async def admin_channels(message: Message, config):
     text = ['Последние 10 каналов:']
     for title, channel_id, owner_id, is_active in rows:
         text.append(f'{title or "-"} | {channel_id} | owner={owner_id} | is_active={is_active}')
+    await message.answer('\n'.join(text))
+
+
+@router.message(F.text == '💾 Бэкап базы')
+async def admin_backup_db(message: Message, config):
+    if not _is_owner(message, config):
+        return
+    source = Path(config.database_path)
+    if not source.exists():
+        await message.answer(f'База не найдена: {source}')
+        return
+    backup_dir = Path('backups')
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    target = backup_dir / f'bot_backup_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.db'
+    shutil.copy2(source, target)
+    await message.answer(f'Бэкап создан: {target}')
+    try:
+        await message.answer_document(FSInputFile(target))
+    except Exception as exc:
+        await message.answer(f'Файл бэкапа создан, но не удалось отправить документ: {_short(str(exc))}')
+
+
+@router.message(F.text == '🚨 Ошибки')
+async def admin_publish_errors(message: Message, config):
+    if not _is_owner(message, config):
+        return
+    rows = await latest_publish_errors(config.database_path)
+    if not rows:
+        await message.answer('Ошибок публикации пока нет.')
+        return
+    text = ['Последние 10 ошибок публикации:']
+    for created_at, owner_id, channel_id, post_id, error in rows:
+        text.append(f'{created_at} | owner={owner_id} | channel={channel_id or "-"} | post=#{post_id} | {_short(error)}')
     await message.answer('\n'.join(text))
 
 
