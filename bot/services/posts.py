@@ -152,3 +152,35 @@ async def set_post_use_signature(db_path: str, post_id: int, use_signature: int)
     async with aiosqlite.connect(db_path) as db:
         await db.execute('UPDATE posts SET use_signature=? WHERE id=?', (use_signature, post_id))
         await db.commit()
+
+
+async def create_draft_with_batch(db_path: str, owner_telegram_id: int, channel_id: str, batch_id: int, text: str | None, media_file_id: str | None = None, media_type: str = 'text', media_json: str | None = None, album_group_id: str | None = None) -> int:
+    async with aiosqlite.connect(db_path) as db:
+        cur = await db.execute(
+            'INSERT INTO posts (owner_telegram_id, channel_id, batch_id, text, media_file_id, media_type, media_json, album_group_id, status, created_at, use_signature, repeat_enabled, repeat_until) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (owner_telegram_id, channel_id, batch_id, text, media_file_id, media_type, media_json, album_group_id, 'draft', _now(), 1, 0, None),
+        )
+        await db.commit()
+        return cur.lastrowid
+
+
+async def list_batch_posts(db_path: str, owner_telegram_id: int, batch_id: int):
+    async with aiosqlite.connect(db_path) as db:
+        return await (await db.execute(
+            "SELECT id, created_at FROM posts WHERE owner_telegram_id=? AND batch_id=? AND status='draft' ORDER BY id ASC",
+            (owner_telegram_id, batch_id),
+        )).fetchall()
+
+
+async def list_any_batch_posts(db_path: str, owner_telegram_id: int, batch_id: int):
+    async with aiosqlite.connect(db_path) as db:
+        return await (await db.execute(
+            "SELECT id, scheduled_at FROM posts WHERE owner_telegram_id=? AND batch_id=? ORDER BY id ASC",
+            (owner_telegram_id, batch_id),
+        )).fetchall()
+
+
+async def delete_batch_posts(db_path: str, owner_telegram_id: int, batch_id: int):
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute('DELETE FROM posts WHERE owner_telegram_id=? AND batch_id=?', (owner_telegram_id, batch_id))
+        await db.commit()

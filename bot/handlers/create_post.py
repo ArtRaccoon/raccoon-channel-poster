@@ -7,7 +7,7 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from bot.keyboards import post_actions_inline, user_menu
+from bot.keyboards import create_post_menu, post_actions_inline, user_menu
 from bot.services.channels import get_channel_settings, has_user_channel, list_user_channels
 from bot.services.posts import (
     CAPTION_LIMIT,
@@ -86,14 +86,19 @@ async def _load_owned_post_or_deny(call: CallbackQuery, config, post_id: int):
 
 
 @router.message(F.text == '✍️ Создать пост')
-async def create_post_start(message: Message, state: FSMContext, config):
+async def create_post_start(message: Message):
+    await message.answer('Что создаём?', reply_markup=create_post_menu())
+
+
+@router.message(F.text == '🖼 Один пост')
+async def create_one_post_start(message: Message, state: FSMContext, config):
     channels = await list_user_channels(config.database_path, message.from_user.id, only_active=True)
     if not channels:
         await message.answer('Сначала добавьте хотя бы один активный канал.')
         return
     await state.set_state(CreatePostState.waiting_channel)
     kb = [[InlineKeyboardButton(text=(title or channel_id), callback_data=f'create_ch:{channel_id}')] for channel_id, title, *_ in channels]
-    await message.answer('Выберите канал для публикации.', reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+    await message.answer('Выберите канал.', reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
 
 
 @router.callback_query(F.data.startswith('create_ch:'))
@@ -139,7 +144,7 @@ async def receive_content(message: Message, state: FSMContext, config):
     await state.clear()
     post = await get_post(config.database_path, post_id)
     channel = await get_channel_settings(config.database_path, message.from_user.id, channel_id)
-    await _show_preview(message, post, channel)
+    await message.answer('Пост загружен. Что сделать дальше?', reply_markup=post_actions_inline(post[0], bool(post[13] if len(post) > 13 else 1)))
 
 
 @router.message(F.text == '📝 Черновики')
@@ -169,6 +174,18 @@ async def open_draft(call: CallbackQuery, config):
     await call.answer()
 
 
+@router.callback_query(F.data.startswith('post_preview:'))
+async def explicit_preview(call: CallbackQuery, config):
+    post_id = int(call.data.split(':')[1])
+    post = await _load_owned_post_or_deny(call, config, post_id)
+    if not post:
+        return
+    channel = await get_channel_settings(config.database_path, call.from_user.id, post[2]) if post[2] else None
+    await _show_preview(call, post, channel)
+    await call.message.answer('Пост загружен. Что сделать дальше?', reply_markup=post_actions_inline(post_id, bool(post[13] if len(post) > 13 else 1)))
+    await call.answer()
+
+
 @router.callback_query(F.data.startswith('post_signature_toggle:'))
 async def toggle_signature(call: CallbackQuery, config):
     post_id = int(call.data.split(':')[1])
@@ -177,9 +194,8 @@ async def toggle_signature(call: CallbackQuery, config):
         return
     await set_post_use_signature(config.database_path, post_id, 0 if post[13] else 1)
     post = await get_post(config.database_path, post_id)
-    channel = await get_channel_settings(config.database_path, call.from_user.id, post[2]) if post[2] else None
-    await _show_preview(call, post, channel)
-    await call.answer('Обновлено')
+    await call.message.answer('Автоподпись включена.' if post[13] else 'Автоподпись выключена.', reply_markup=post_actions_inline(post_id, bool(post[13])))
+    await call.answer()
 
 
 @router.callback_query(F.data.startswith('post_edit:'))
@@ -210,7 +226,7 @@ async def apply_edit(message: Message, state: FSMContext, config):
     await update_post_text(config.database_path, post_id, new_text)
     await state.clear()
     updated = await get_post(config.database_path, post_id)
-    await _show_preview(message, updated, channel)
+    await message.answer('Текст обновлён.', reply_markup=post_actions_inline(post_id, bool(updated[13] if len(updated)>13 else 1)))
 
 
 @router.callback_query(F.data.startswith('post_media:'))
@@ -238,8 +254,7 @@ async def replace_media(message: Message, state: FSMContext, config):
     await update_post_media(config.database_path, post_id, 'photo', media_file_id=message.photo[-1].file_id, media_json=None)
     await state.clear()
     updated = await get_post(config.database_path, post_id)
-    channel = await get_channel_settings(config.database_path, message.from_user.id, updated[2]) if updated[2] else None
-    await _show_preview(message, updated, channel)
+    await message.answer('Медиа обновлено.', reply_markup=post_actions_inline(post_id, bool(updated[13] if len(updated)>13 else 1)))
 
 
 @router.callback_query(F.data.startswith('post_keep:'))
