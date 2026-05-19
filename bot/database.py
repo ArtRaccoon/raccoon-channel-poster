@@ -21,6 +21,10 @@ SCHEMA = [
         is_active INTEGER DEFAULT 1,
         created_at TEXT,
         signature TEXT,
+        signature_2 TEXT,
+        signature_3 TEXT,
+        signature_mode TEXT DEFAULT 'first',
+        signature_rotate_index INTEGER DEFAULT 0,
         UNIQUE(owner_telegram_id, channel_id)
     )
     ''',
@@ -32,6 +36,7 @@ SCHEMA = [
         text TEXT,
         media_file_id TEXT,
         media_type TEXT,
+        media_json TEXT,
         status TEXT DEFAULT 'draft',
         created_at TEXT,
         published_at TEXT,
@@ -68,6 +73,11 @@ async def init_db(path: str) -> None:
         await _ensure_column(db, 'posts', 'media_type', 'ALTER TABLE posts ADD COLUMN media_type TEXT')
         await _ensure_column(db, 'posts', 'scheduled_at', 'ALTER TABLE posts ADD COLUMN scheduled_at TEXT')
         await _ensure_column(db, 'posts', 'buttons_json', 'ALTER TABLE posts ADD COLUMN buttons_json TEXT')
+        await _ensure_column(db, 'posts', 'media_json', 'ALTER TABLE posts ADD COLUMN media_json TEXT')
         await _ensure_column(db, 'channels', 'is_active', 'ALTER TABLE channels ADD COLUMN is_active INTEGER DEFAULT 1')
         await _ensure_column(db, 'channels', 'signature', 'ALTER TABLE channels ADD COLUMN signature TEXT')
+        await _ensure_column(db, 'channels', 'signature_2', 'ALTER TABLE channels ADD COLUMN signature_2 TEXT')
+        await _ensure_column(db, 'channels', 'signature_3', 'ALTER TABLE channels ADD COLUMN signature_3 TEXT')
+        await _ensure_column(db, 'channels', 'signature_mode', "ALTER TABLE channels ADD COLUMN signature_mode TEXT DEFAULT 'first'")
+        await _ensure_column(db, 'channels', 'signature_rotate_index', 'ALTER TABLE channels ADD COLUMN signature_rotate_index INTEGER DEFAULT 0')
         await db.commit()

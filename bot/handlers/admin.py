@@ -1,4 +1,4 @@
-import shutil
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 
@@ -76,7 +76,8 @@ async def admin_backup_db(message: Message, config):
     backup_dir = Path('backups')
     backup_dir.mkdir(parents=True, exist_ok=True)
     target = backup_dir / f'bot_backup_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.db'
-    shutil.copy2(source, target)
+    with sqlite3.connect(source) as src, sqlite3.connect(target) as dst:
+        src.backup(dst)
     await message.answer(f'Бэкап создан: {target}')
     try:
         await message.answer_document(FSInputFile(target))

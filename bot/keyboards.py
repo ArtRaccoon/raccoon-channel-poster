@@ -7,6 +7,7 @@ def user_menu(is_owner: bool) -> ReplyKeyboardMarkup:
         [KeyboardButton(text='📋 Мои каналы')],
         [KeyboardButton(text='✍️ Создать пост')],
         [KeyboardButton(text='📝 Черновики'), KeyboardButton(text='🕘 Последние посты')],
+        [KeyboardButton(text='🗓 Расписание')],
         [KeyboardButton(text='🔎 Поиск постов')],
         [KeyboardButton(text='❓ Помощь')],
     ]

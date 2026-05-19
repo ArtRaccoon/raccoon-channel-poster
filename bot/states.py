@@ -15,5 +15,11 @@ class CreatePostState(StatesGroup):
     waiting_search_query = State()
 
 
+class BulkScheduleState(StatesGroup):
+    waiting_count = State()
+    waiting_start = State()
+    waiting_interval = State()
+
+
 class ChannelSignatureState(StatesGroup):
     waiting_signature = State()
