@@ -97,8 +97,11 @@ async def create_post_start(message: Message, state: FSMContext, config):
 
 
 @router.callback_query(F.data.startswith('create_ch:'))
-async def create_choose_channel(call: CallbackQuery, state: FSMContext):
+async def create_choose_channel(call: CallbackQuery, state: FSMContext, config):
     channel_id = call.data.split(':', 1)[1]
+    if not await has_user_channel(config.database_path, call.from_user.id, channel_id):
+        await call.answer('Канал недоступен', show_alert=True)
+        return
     await state.update_data(channel_id=channel_id)
     await state.set_state(CreatePostState.waiting_content)
     await call.message.answer('Отправьте пост: текст, фото или сгруппированные медиа.')
