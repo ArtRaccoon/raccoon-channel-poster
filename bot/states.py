@@ -19,3 +19,10 @@ class CreatePostState(StatesGroup):
     waiting_template_title = State()
     waiting_template_text = State()
     waiting_schedule_rule = State()
+
+    waiting_batch_channel = State()
+    waiting_batch_schedule_text = State()
+    waiting_batch_content = State()
+    waiting_batch_review = State()
+    waiting_settings_schedule_text = State()
+    waiting_settings_signature_text = State()
