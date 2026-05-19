@@ -12,8 +12,8 @@ def _now() -> str:
 async def create_draft(db_path: str, owner_telegram_id: int, text: str | None, media_file_id: str | None = None, media_type: str = 'text', media_json: str | None = None, album_group_id: str | None = None) -> int:
     async with aiosqlite.connect(db_path) as db:
         cur = await db.execute(
-            'INSERT INTO posts (owner_telegram_id, text, media_file_id, media_type, media_json, album_group_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            (owner_telegram_id, text, media_file_id, media_type, media_json, album_group_id, 'draft', _now()),
+            'INSERT INTO posts (owner_telegram_id, text, media_file_id, media_type, media_json, album_group_id, status, created_at, use_signature, repeat_enabled, repeat_until) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (owner_telegram_id, text, media_file_id, media_type, media_json, album_group_id, 'draft', _now(), 1, 0, None),
         )
         await db.commit()
         return cur.lastrowid
@@ -21,7 +21,7 @@ async def create_draft(db_path: str, owner_telegram_id: int, text: str | None, m
 
 async def get_post(db_path: str, post_id: int):
     async with aiosqlite.connect(db_path) as db:
-        cur = await db.execute('SELECT id, owner_telegram_id, channel_id, text, media_file_id, media_type, status, created_at, published_at, scheduled_at, buttons_json, media_json, album_group_id FROM posts WHERE id=?', (post_id,))
+        cur = await db.execute('SELECT id, owner_telegram_id, channel_id, text, media_file_id, media_type, status, created_at, published_at, scheduled_at, buttons_json, media_json, album_group_id, use_signature, repeat_enabled, repeat_interval_minutes, repeat_until FROM posts WHERE id=?', (post_id,))
         return await cur.fetchone()
 
 
@@ -145,4 +145,10 @@ async def get_due_scheduled_posts(db_path: str, now_iso: str):
 async def add_publish_log(db_path: str, owner_telegram_id: int, channel_id: str, post_id: int, status: str, error: str | None = None) -> None:
     async with aiosqlite.connect(db_path) as db:
         await db.execute('INSERT INTO publish_logs (owner_telegram_id, channel_id, post_id, status, error, created_at) VALUES (?, ?, ?, ?, ?, ?)', (owner_telegram_id, channel_id, post_id, status, error, _now()))
+        await db.commit()
+
+
+async def set_post_use_signature(db_path: str, post_id: int, use_signature: int):
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute('UPDATE posts SET use_signature=? WHERE id=?', (use_signature, post_id))
         await db.commit()

@@ -10,7 +10,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from bot.config import load_config
 from bot.database import init_db
-from bot.handlers import add_channel, admin, create_post, help, my_channels, start, user_menu
+from bot.handlers import add_channel, admin, batch_schedule, create_post, help, my_channels, settings, start, user_menu
 from bot.proxy import build_session
 from bot.services.posts import get_due_scheduled_posts
 
@@ -52,6 +52,8 @@ async def main() -> None:
     dp.include_router(add_channel.router)
     dp.include_router(my_channels.router)
     dp.include_router(create_post.router)
+    dp.include_router(batch_schedule.router)
+    dp.include_router(settings.router)
     dp.include_router(admin.router)
 
     scheduler = AsyncIOScheduler()

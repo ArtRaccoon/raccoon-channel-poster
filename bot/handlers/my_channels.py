@@ -12,23 +12,36 @@ async def show_channels(message: Message, config):
     if not rows:
         await message.answer('У вас пока нет активных каналов.')
         return
-    text = ['Ваши активные каналы:']
-    kb = []
-    for channel_id, title, username, _ in rows:
-        uname = f'@{username}' if username else 'без username'
-        text.append(f'- {title or "Без названия"} ({uname}, {channel_id})')
-        kb.append([
-            InlineKeyboardButton(text=f'Удалить {title or channel_id}', callback_data=f'ch_delete:{channel_id}'),
-            InlineKeyboardButton(text='Проверить доступ', callback_data=f'ch_check:{channel_id}'),
-        ])
+    text = ['Ваши каналы:', '']
+    for i, (_, title, _, _) in enumerate(rows, start=1):
+        text.append(f'{i}. {title or "Без названия"}')
+    kb = [[InlineKeyboardButton(text=(title or channel_id), callback_data=f'ch_menu:{channel_id}')] for channel_id, title, *_ in rows]
     await message.answer('\n'.join(text), reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+
+
+@router.callback_query(F.data.startswith('ch_menu:'))
+async def channel_menu(call: CallbackQuery):
+    cid = call.data.split(':', 1)[1]
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='⚙️ Настроить канал', callback_data=f'ch_setup:{cid}')],
+        [InlineKeyboardButton(text='🧪 Проверить доступ', callback_data=f'ch_check:{cid}')],
+        [InlineKeyboardButton(text='❌ Отключить канал', callback_data=f'ch_delete:{cid}')],
+    ])
+    await call.message.answer('Действия с каналом:', reply_markup=kb)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith('ch_setup:'))
+async def setup_channel(call: CallbackQuery):
+    await call.answer()
+    await call.message.answer('Откройте ⚙️ Настройки для изменения автоподписи и расписания.')
 
 
 @router.callback_query(F.data.startswith('ch_delete:'))
 async def delete_channel(call: CallbackQuery, config):
     channel_id = call.data.split(':', 1)[1]
     await deactivate_channel(config.database_path, call.from_user.id, channel_id)
-    await call.message.answer('Канал отключён. Откройте 📋 Мои каналы, чтобы увидеть актуальный список.')
+    await call.message.answer('Канал отключён.')
     await call.answer('Отключено')
 
 
@@ -38,14 +51,8 @@ async def check_channel(call: CallbackQuery, config, bot):
     try:
         chat = await bot.get_chat(channel_id)
         bot_member = await bot.get_chat_member(chat.id, bot.id)
-        user_member = await bot.get_chat_member(chat.id, call.from_user.id)
         can_post = getattr(bot_member, 'can_post_messages', True) is not False
-        await call.message.answer(
-            f'Канал доступен: да\n'
-            f'Бот администратор: {"да" if bot_member.status in ("administrator", "creator") else "нет"}\n'
-            f'Бот может публиковать: {"да" if can_post else "нет"}\n'
-            f'Пользователь admin/creator: {"да" if user_member.status in ("administrator", "creator") else "нет"}'
-        )
-    except Exception as exc:
-        await call.message.answer(f'Проверка не пройдена: {exc}')
+        await call.message.answer(f'Доступ к каналу проверен. Бот может публиковать: {"да" if can_post else "нет"}.')
+    except Exception:
+        await call.message.answer('Проверка не пройдена. Проверьте права бота и доступ к каналу.')
     await call.answer()

@@ -45,7 +45,7 @@ def classify_publish_error(exc: Exception) -> str:
 
 
 async def render_post_preview(bot, user_id: int, post: tuple, channel: dict[str, Any] | None):
-    signature = channel.get('signature') if channel else None
+    signature = channel.get('signature') if channel and post[13] else None
     full_text = build_post_text_with_signature(post[3], signature)
     buttons_json = post[10] or (channel.get('default_buttons_json') if channel else None)
     markup = build_url_buttons_markup(buttons_json)
@@ -79,7 +79,7 @@ async def publish_post(bot, db_path: str, post_id: int) -> tuple[bool, str]:
         return False, 'Не удалось опубликовать. Канал отключён или недоступен у пользователя.'
 
     channel = await get_channel_settings(db_path, post[1], post[2])
-    signature = channel.get('signature') if channel else None
+    signature = channel.get('signature') if channel and post[13] else None
     full_text = build_post_text_with_signature(post[3], signature)
     buttons_json = post[10] or (channel.get('default_buttons_json') if channel else None)
     markup = build_url_buttons_markup(buttons_json)
