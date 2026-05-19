@@ -67,6 +67,16 @@ SCHEMA = [
         created_at TEXT
     )
     ''',
+
+    '''
+    CREATE TABLE IF NOT EXISTS post_batches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_telegram_id INTEGER NOT NULL,
+        channel_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT
+    )
+    ''',
     '''
     CREATE TABLE IF NOT EXISTS channel_schedules (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -103,6 +113,7 @@ async def init_db(path: str) -> None:
         await _ensure_column(db, 'posts', 'repeat_enabled', 'ALTER TABLE posts ADD COLUMN repeat_enabled INTEGER DEFAULT 0')
         await _ensure_column(db, 'posts', 'repeat_interval_minutes', 'ALTER TABLE posts ADD COLUMN repeat_interval_minutes INTEGER')
         await _ensure_column(db, 'posts', 'repeat_until', 'ALTER TABLE posts ADD COLUMN repeat_until TEXT')
+        await _ensure_column(db, 'posts', 'batch_id', 'ALTER TABLE posts ADD COLUMN batch_id INTEGER')
 
         await _ensure_column(db, 'channels', 'is_active', 'ALTER TABLE channels ADD COLUMN is_active INTEGER DEFAULT 1')
         await _ensure_column(db, 'channels', 'signature', 'ALTER TABLE channels ADD COLUMN signature TEXT')
