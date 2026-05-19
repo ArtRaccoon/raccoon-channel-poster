@@ -6,7 +6,8 @@ def user_menu(is_owner: bool) -> ReplyKeyboardMarkup:
         [KeyboardButton(text='➕ Добавить канал')],
         [KeyboardButton(text='📋 Мои каналы')],
         [KeyboardButton(text='✍️ Создать пост')],
-        [KeyboardButton(text='📝 Черновики'), KeyboardButton(text='🕘 Последние посты')],
+        [KeyboardButton(text='📝 Черновики')],
+        [KeyboardButton(text='⚙️ Настройки')],
         [KeyboardButton(text='❓ Помощь')],
     ]
     if is_owner:
@@ -29,12 +30,14 @@ def admin_menu() -> ReplyKeyboardMarkup:
     )
 
 
-def post_actions_inline(post_id: int) -> InlineKeyboardMarkup:
+def post_actions_inline(post_id: int, use_signature: bool = True) -> InlineKeyboardMarkup:
+    sign = 'Вкл' if use_signature else 'Выкл'
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='✅ Опубликовать', callback_data=f'post_publish:{post_id}')],
-        [InlineKeyboardButton(text='✏️ Редактировать текст', callback_data=f'post_edit:{post_id}')],
-        [InlineKeyboardButton(text='📣 Выбрать канал', callback_data=f'post_choose_channel:{post_id}')],
-        [InlineKeyboardButton(text='💾 Оставить в черновиках', callback_data=f'post_keep:{post_id}')],
-        [InlineKeyboardButton(text='🕒 Запланировать', callback_data=f'post_schedule:{post_id}')],
+        [InlineKeyboardButton(text='✏️ Редактировать подпись/текст', callback_data=f'post_edit:{post_id}')],
+        [InlineKeyboardButton(text='🖼 Изменить медиа', callback_data=f'post_media:{post_id}')],
+        [InlineKeyboardButton(text=f'✍️ Автоподпись: {sign}', callback_data=f'post_signature_toggle:{post_id}')],
+        [InlineKeyboardButton(text='✅ Опубликовать сейчас', callback_data=f'post_publish:{post_id}')],
+        [InlineKeyboardButton(text='🕒 Опубликовать позже', callback_data=f'post_schedule:{post_id}')],
+        [InlineKeyboardButton(text='💾 Сохранить как черновик', callback_data=f'post_keep:{post_id}')],
         [InlineKeyboardButton(text='❌ Отменить', callback_data=f'post_cancel:{post_id}')],
     ])

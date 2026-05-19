@@ -1,3 +1,5 @@
+import asyncio
+import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -6,8 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from bot.keyboards import post_actions_inline, user_menu
-from bot.services.channels import has_user_channel, list_user_channels
-from bot.services.publishing import publish_post, render_post_preview
+from bot.services.channels import get_channel_settings, has_user_channel, list_user_channels
 from bot.services.posts import (
     CAPTION_LIMIT,
     create_draft,
@@ -16,90 +17,129 @@ from bot.services.posts import (
     list_recent_posts,
     set_post_channel,
     set_post_status,
+    set_post_use_signature,
+    update_post_media,
     update_post_text,
 )
+from bot.services.publishing import build_post_text_with_signature, render_post_preview, publish_post
 from bot.states import CreatePostState
 
 router = Router()
+ALBUM_BUFFER: dict[str, list[Message]] = {}
+ALBUM_TASKS: dict[str, asyncio.Task] = {}
 
 
-def _preview(media_type: str | None, text: str | None) -> str:
-    p = (text or '').strip()
-    p = p if len(p) <= 80 else f'{p[:77]}...'
-    if media_type == 'photo':
-        return f'type=photo, preview={p or "<без подписи>"}'
-    return f'type=text, preview={p or "<пусто>"}'
+def _target(obj: Message | CallbackQuery) -> Message:
+    return obj.message if isinstance(obj, CallbackQuery) else obj
 
 
-async def _show_post_preview(target: Message | CallbackQuery, post: tuple):
-    _, _, channel_id, text, _, media_type, status, created_at, _, scheduled_at, _, _, _ = post
-    msg = (
-        f'Пост #{post[0]}\nstatus={status}\nchannel={channel_id or "-"}\n'
-        f'created_at={created_at}\nscheduled_at={scheduled_at or "-"}\n{_preview(media_type, text)}'
-    )
-    if isinstance(target, Message):
-        await target.answer(msg, reply_markup=post_actions_inline(post[0]))
-    else:
-        await target.message.answer(msg, reply_markup=post_actions_inline(post[0]))
+def _draft_row(post_id: int, media_type: str, channel_title: str, created_at: str) -> str:
+    dt = datetime.fromisoformat(created_at)
+    return f'#{post_id} — {media_type} — Канал: {channel_title} — {dt.strftime("%d %b %H:%M")}'
+
+
+async def _show_preview(target_obj: Message | CallbackQuery, post: tuple, channel: dict | None):
+    ok, err = await render_post_preview(target_obj.bot, target_obj.from_user.id, post, channel)
+    target = _target(target_obj)
+    if not ok:
+        await target.answer(err)
+        return
+    await target.answer('Настройки поста:', reply_markup=post_actions_inline(post[0], bool(post[13] if len(post) > 13 else 1)))
+
+
+async def _finalize_album(group_id: str, state: FSMContext, config):
+    await asyncio.sleep(1.7)
+    items = ALBUM_BUFFER.pop(group_id, [])
+    ALBUM_TASKS.pop(group_id, None)
+    if not items:
+        return
+    msg = items[0]
+    data = await state.get_data()
+    channel_id = data.get('channel_id')
+    if not channel_id:
+        return
+    if len(items) > 10:
+        await msg.answer('В альбоме может быть максимум 10 фото.')
+        return
+    media = [{"file_id": m.photo[-1].file_id} for m in items if m.photo]
+    if len(media) < 2:
+        await msg.answer('Альбом должен содержать минимум 2 фото.')
+        return
+    caption = next((m.caption for m in items if m.caption), None)
+    if caption and len(caption) > CAPTION_LIMIT:
+        await msg.answer('Подпись к фото не должна быть длиннее 1024 символов.')
+        return
+    post_id = await create_draft(config.database_path, msg.from_user.id, caption, None, 'album', json.dumps(media), group_id)
+    await set_post_channel(config.database_path, post_id, channel_id)
+    await state.clear()
+    post = await get_post(config.database_path, post_id)
+    channel = await get_channel_settings(config.database_path, msg.from_user.id, channel_id)
+    await _show_preview(msg, post, channel)
+
+
+async def _load_owned_post_or_deny(call: CallbackQuery, config, post_id: int):
+    post = await get_post(config.database_path, post_id)
+    if not post or post[1] != call.from_user.id:
+        await call.answer('Нет доступа', show_alert=True)
+        return None
+    return post
 
 
 @router.message(F.text == '✍️ Создать пост')
-async def create_post_start(message: Message, state: FSMContext):
-    await state.set_state(CreatePostState.waiting_content)
-    await message.answer('Отправьте текст или фото. Можно отправить фото с подписью.')
-
-
-@router.message(CreatePostState.waiting_content)
-async def receive_post_content(message: Message, state: FSMContext, config):
+async def create_post_start(message: Message, state: FSMContext, config):
     channels = await list_user_channels(config.database_path, message.from_user.id, only_active=True)
     if not channels:
         await message.answer('Сначала добавьте хотя бы один активный канал.')
+        return
+    await state.set_state(CreatePostState.waiting_channel)
+    kb = [[InlineKeyboardButton(text=(title or channel_id), callback_data=f'create_ch:{channel_id}')] for channel_id, title, *_ in channels]
+    await message.answer('Выберите канал для публикации.', reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+
+
+@router.callback_query(F.data.startswith('create_ch:'))
+async def create_choose_channel(call: CallbackQuery, state: FSMContext, config):
+    channel_id = call.data.split(':', 1)[1]
+    if not await has_user_channel(config.database_path, call.from_user.id, channel_id):
+        await call.answer('Канал недоступен', show_alert=True)
+        return
+    await state.update_data(channel_id=channel_id)
+    await state.set_state(CreatePostState.waiting_content)
+    await call.message.answer('Отправьте пост: текст, фото или сгруппированные медиа.')
+    await call.answer()
+
+
+@router.message(CreatePostState.waiting_content)
+async def receive_content(message: Message, state: FSMContext, config):
+    data = await state.get_data()
+    channel_id = data.get('channel_id')
+    if not channel_id:
         await state.clear()
         return
 
-    media_type = 'text'
-    media_file_id = None
-    text = message.text
+    if message.media_group_id and message.photo:
+        gid = message.media_group_id
+        ALBUM_BUFFER.setdefault(gid, []).append(message)
+        if gid in ALBUM_TASKS:
+            ALBUM_TASKS[gid].cancel()
+        ALBUM_TASKS[gid] = asyncio.create_task(_finalize_album(gid, state, config))
+        return
+
+    media_type, media_file_id, text = 'text', None, message.text
     if message.photo:
-        media_type = 'photo'
-        media_file_id = message.photo[-1].file_id
-        text = message.caption
+        media_type, media_file_id, text = 'photo', message.photo[-1].file_id, message.caption
     if media_type == 'photo' and text and len(text) > CAPTION_LIMIT:
         await message.answer('Подпись к фото не должна быть длиннее 1024 символов.')
         return
     if media_type == 'text' and not text:
-        await message.answer('Отправьте текст или фото. Можно отправить фото с подписью.')
+        await message.answer('Отправьте текст, фото или альбом.')
         return
 
     post_id = await create_draft(config.database_path, message.from_user.id, text, media_file_id, media_type)
-    await state.update_data(post_id=post_id)
-    await state.set_state(CreatePostState.waiting_channel)
-
-    buttons = [[InlineKeyboardButton(text=(title or channel_id), callback_data=f'ch_select:{post_id}:{channel_id}')] for channel_id, title, *_ in channels]
-    await message.answer('Черновик создан. Выберите канал:', reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
-
-
-@router.callback_query(F.data.startswith('ch_select:'))
-async def choose_channel(call: CallbackQuery, config):
-    _, post_id, channel_id = call.data.split(':', 2)
-    post = await get_post(config.database_path, int(post_id))
-    if not post or post[1] != call.from_user.id:
-        await call.answer('Нет доступа', show_alert=True)
-        return
-    if not await has_user_channel(config.database_path, call.from_user.id, channel_id):
-        await call.answer('Канал недоступен', show_alert=True)
-        return
-    await set_post_channel(config.database_path, int(post_id), channel_id)
-    await call.answer('Канал выбран')
-    post = await get_post(config.database_path, int(post_id))
-    channel = None
-    if post[2]:
-        from bot.services.channels import get_channel_settings
-        channel = await get_channel_settings(config.database_path, call.from_user.id, str(post[2]))
-    ok, err = await render_post_preview(call.bot, call.from_user.id, post, channel)
-    if not ok:
-        await call.message.answer(f"Preview error: {err}")
-    await _show_post_preview(call, post)
+    await set_post_channel(config.database_path, post_id, channel_id)
+    await state.clear()
+    post = await get_post(config.database_path, post_id)
+    channel = await get_channel_settings(config.database_path, message.from_user.id, channel_id)
+    await _show_preview(message, post, channel)
 
 
 @router.message(F.text == '📝 Черновики')
@@ -108,168 +148,161 @@ async def show_drafts(message: Message, config):
     if not rows:
         await message.answer('Черновиков нет.')
         return
-    kb_rows = []
-    text = ['Последние 10 черновиков:']
-    for post_id, media_type, post_text, _, created_at in rows:
-        text.append(f'#{post_id} | {_preview(media_type, post_text)} | {created_at}')
-        kb_rows.append([
-            InlineKeyboardButton(text=f'Открыть #{post_id}', callback_data=f'draft_open:{post_id}'),
-            InlineKeyboardButton(text='Удалить', callback_data=f'draft_delete:{post_id}'),
-        ])
-    await message.answer('\n'.join(text), reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
-
-
-@router.message(F.text == '🕘 Последние посты')
-async def show_recent_posts(message: Message, config):
-    rows = await list_recent_posts(config.database_path, message.from_user.id, only_drafts=False)
-    if not rows:
-        await message.answer('Постов пока нет.')
-        return
-    text = ['Последние 10 постов:']
-    for post_id, media_type, post_text, status, created_at in rows:
-        text.append(f'#{post_id} | {status} | {_preview(media_type, post_text)} | {created_at}')
-    await message.answer('\n'.join(text))
+    channels = {c[0]: c[1] or c[0] for c in await list_user_channels(config.database_path, message.from_user.id, only_active=False)}
+    text = ['Черновики:']
+    kb = []
+    for post_id, media_type, _, _, created_at in rows:
+        post = await get_post(config.database_path, post_id)
+        text.append(_draft_row(post_id, media_type, channels.get(post[2], 'Не выбран'), created_at))
+        kb.append([InlineKeyboardButton(text=f'Открыть #{post_id}', callback_data=f'draft_open:{post_id}'), InlineKeyboardButton(text='Удалить', callback_data=f'draft_delete:{post_id}')])
+    await message.answer('\n'.join(text), reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
 
 
 @router.callback_query(F.data.startswith('draft_open:'))
 async def open_draft(call: CallbackQuery, config):
     post_id = int(call.data.split(':')[1])
-    post = await get_post(config.database_path, post_id)
-    if not post or post[1] != call.from_user.id:
-        await call.answer('Нет доступа', show_alert=True)
+    post = await _load_owned_post_or_deny(call, config, post_id)
+    if not post:
         return
+    channel = await get_channel_settings(config.database_path, call.from_user.id, post[2]) if post[2] else None
+    await _show_preview(call, post, channel)
     await call.answer()
-    if post[2]:
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text='✅ Опубликовать', callback_data=f'post_publish:{post_id}')],
-            [InlineKeyboardButton(text='✏️ Редактировать текст', callback_data=f'post_edit:{post_id}')],
-            [InlineKeyboardButton(text='📣 Выбрать канал', callback_data=f'post_choose_channel:{post_id}')],
-            [InlineKeyboardButton(text='🕒 Запланировать', callback_data=f'post_schedule:{post_id}')],
-            [InlineKeyboardButton(text='🗑 Удалить', callback_data=f'draft_delete:{post_id}')],
-            [InlineKeyboardButton(text='⬅️ Назад', callback_data='draft_back')],
-        ])
-    else:
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text='📣 Выбрать канал', callback_data=f'post_choose_channel:{post_id}')],
-            [InlineKeyboardButton(text='✏️ Редактировать текст', callback_data=f'post_edit:{post_id}')],
-            [InlineKeyboardButton(text='🗑 Удалить', callback_data=f'draft_delete:{post_id}')],
-            [InlineKeyboardButton(text='⬅️ Назад', callback_data='draft_back')],
-        ])
-    await call.message.answer(f'Черновик #{post_id}\n{_preview(post[5], post[3])}', reply_markup=kb)
 
 
-@router.callback_query(F.data == 'draft_back')
-async def draft_back(call: CallbackQuery):
-    await call.answer()
-    await call.message.answer('Откройте раздел 📝 Черновики в меню.')
-
-
-@router.callback_query(F.data.startswith('draft_delete:'))
-async def remove_draft(call: CallbackQuery, config):
+@router.callback_query(F.data.startswith('post_signature_toggle:'))
+async def toggle_signature(call: CallbackQuery, config):
     post_id = int(call.data.split(':')[1])
-    await delete_draft(config.database_path, post_id, call.from_user.id)
-    await call.answer('Удалено')
+    post = await _load_owned_post_or_deny(call, config, post_id)
+    if not post:
+        return
+    await set_post_use_signature(config.database_path, post_id, 0 if post[13] else 1)
+    post = await get_post(config.database_path, post_id)
+    channel = await get_channel_settings(config.database_path, call.from_user.id, post[2]) if post[2] else None
+    await _show_preview(call, post, channel)
+    await call.answer('Обновлено')
 
 
 @router.callback_query(F.data.startswith('post_edit:'))
 async def start_edit(call: CallbackQuery, state: FSMContext, config):
     post_id = int(call.data.split(':')[1])
-    post = await get_post(config.database_path, post_id)
-    if not post or post[1] != call.from_user.id:
-        await call.answer('Нет доступа', show_alert=True)
+    post = await _load_owned_post_or_deny(call, config, post_id)
+    if not post:
         return
     await state.set_state(CreatePostState.waiting_edit_text)
     await state.update_data(edit_post_id=post_id)
+    await call.message.answer('Отправьте новый текст или подпись.')
     await call.answer()
-    await call.message.answer('Отправьте новый текст.')
 
 
 @router.message(CreatePostState.waiting_edit_text)
 async def apply_edit(message: Message, state: FSMContext, config):
-    data = await state.get_data()
-    post_id = data.get('edit_post_id')
-    post = await get_post(config.database_path, int(post_id))
+    post_id = int((await state.get_data()).get('edit_post_id'))
+    post = await get_post(config.database_path, post_id)
     if not post or post[1] != message.from_user.id:
         await state.clear()
         return
     new_text = message.text or ''
-    if post[5] == 'photo' and len(new_text) > CAPTION_LIMIT:
-        await message.answer('Подпись к фото не должна быть длиннее 1024 символов.')
+    channel = await get_channel_settings(config.database_path, message.from_user.id, post[2]) if post[2] else None
+    signature = channel.get('signature') if channel and post[13] else None
+    if post[5] in ('photo', 'album') and len(build_post_text_with_signature(new_text, signature)) > CAPTION_LIMIT:
+        await message.answer('Подпись вместе с автоподписью не должна быть длиннее 1024 символов.')
         return
-    await update_post_text(config.database_path, int(post_id), new_text)
+    await update_post_text(config.database_path, post_id, new_text)
     await state.clear()
-    updated = await get_post(config.database_path, int(post_id))
-    await _show_post_preview(message, updated)
+    updated = await get_post(config.database_path, post_id)
+    await _show_preview(message, updated, channel)
 
 
-
-@router.callback_query(F.data.startswith('post_choose_channel:'))
-async def choose_channel_for_existing_draft(call: CallbackQuery, config):
+@router.callback_query(F.data.startswith('post_media:'))
+async def edit_media_start(call: CallbackQuery, state: FSMContext, config):
     post_id = int(call.data.split(':')[1])
-    post = await get_post(config.database_path, post_id)
-    if not post or post[1] != call.from_user.id:
-        await call.answer('Нет доступа', show_alert=True)
+    post = await _load_owned_post_or_deny(call, config, post_id)
+    if not post:
         return
-    channels = await list_user_channels(config.database_path, call.from_user.id, only_active=True)
-    if not channels:
-        await call.answer('Нет активных каналов', show_alert=True)
-        return
-    buttons = [[InlineKeyboardButton(text=(title or channel_id), callback_data=f'ch_select:{post_id}:{channel_id}')] for channel_id, title, *_ in channels]
-    await call.message.answer('Выберите канал:', reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await state.set_state(CreatePostState.waiting_replace_media)
+    await state.update_data(media_post_id=post_id)
+    await call.message.answer('Отправьте новое фото.')
     await call.answer()
 
 
+@router.message(CreatePostState.waiting_replace_media)
+async def replace_media(message: Message, state: FSMContext, config):
+    post_id = int((await state.get_data()).get('media_post_id'))
+    post = await get_post(config.database_path, post_id)
+    if not post or post[1] != message.from_user.id:
+        await state.clear()
+        return
+    if not message.photo:
+        await message.answer('Нужно отправить фото.')
+        return
+    await update_post_media(config.database_path, post_id, 'photo', media_file_id=message.photo[-1].file_id, media_json=None)
+    await state.clear()
+    updated = await get_post(config.database_path, post_id)
+    channel = await get_channel_settings(config.database_path, message.from_user.id, updated[2]) if updated[2] else None
+    await _show_preview(message, updated, channel)
+
+
 @router.callback_query(F.data.startswith('post_keep:'))
-async def keep_draft(call: CallbackQuery):
-    await call.answer('Оставлено в черновиках')
+async def keep_draft(call: CallbackQuery, config):
+    post_id = int(call.data.split(':')[1])
+    post = await _load_owned_post_or_deny(call, config, post_id)
+    if not post:
+        return
+    await call.answer()
+    await call.message.answer('Пост сохранён в черновиках.')
 
 
 @router.callback_query(F.data.startswith('post_cancel:'))
 async def cancel_post(call: CallbackQuery, config):
     post_id = int(call.data.split(':')[1])
-    post = await get_post(config.database_path, post_id)
-    if not post or post[1] != call.from_user.id:
-        await call.answer('Нет доступа', show_alert=True)
+    post = await _load_owned_post_or_deny(call, config, post_id)
+    if not post:
         return
     if post[6] == 'draft':
         await delete_draft(config.database_path, post_id, call.from_user.id)
-        await call.message.answer('Черновик удалён.')
+        await call.message.answer('Пост отменён и удалён.')
         await call.answer('Удалено')
-    else:
-        await call.message.answer('Пост уже нельзя отменить.')
-        await call.answer('Недоступно')
+        return
+    await call.message.answer('Этот пост уже нельзя отменить.')
+    await call.answer('Недоступно')
+
+
+@router.callback_query(F.data.startswith('draft_delete:'))
+async def remove_draft(call: CallbackQuery, config):
+    post_id = int(call.data.split(':')[1])
+    post = await _load_owned_post_or_deny(call, config, post_id)
+    if not post:
+        return
+    await delete_draft(config.database_path, post_id, call.from_user.id)
+    await call.answer('Удалено')
 
 
 @router.callback_query(F.data.startswith('post_schedule:'))
 async def schedule_start(call: CallbackQuery, state: FSMContext, config):
     post_id = int(call.data.split(':')[1])
-    post = await get_post(config.database_path, post_id)
-    if not post or post[1] != call.from_user.id:
-        await call.answer('Нет доступа', show_alert=True)
-        return
-    if not post[2]:
-        await call.answer('Сначала выберите канал для поста.', show_alert=True)
+    post = await _load_owned_post_or_deny(call, config, post_id)
+    if not post:
         return
     await state.set_state(CreatePostState.waiting_schedule_at)
     await state.update_data(schedule_post_id=post_id)
-    await call.answer()
     await call.message.answer('Отправьте дату и время в формате ДД.ММ.ГГГГ ЧЧ:ММ')
+    await call.answer()
 
 
 @router.message(CreatePostState.waiting_schedule_at)
 async def schedule_apply(message: Message, state: FSMContext, config):
-    data = await state.get_data()
-    post_id = int(data['schedule_post_id'])
+    post_id = int((await state.get_data())['schedule_post_id'])
     post = await get_post(config.database_path, post_id)
     if not post or post[1] != message.from_user.id:
         await state.clear()
         return
     if not post[2] or not await has_user_channel(config.database_path, message.from_user.id, str(post[2])):
+        await message.answer('Сначала выберите активный канал для поста.')
         await state.clear()
-        await message.answer('Канал для поста не выбран или уже отключён. Выберите канал заново.')
         return
+    tz = (await get_channel_settings(config.database_path, message.from_user.id, post[2]) or {}).get('channel_timezone') or config.timezone
     try:
-        dt = datetime.strptime(message.text.strip(), '%d.%m.%Y %H:%M').replace(tzinfo=ZoneInfo(config.timezone))
+        dt = datetime.strptime(message.text.strip(), '%d.%m.%Y %H:%M').replace(tzinfo=ZoneInfo(tz))
     except Exception:
         await message.answer('Неверный формат. Используйте ДД.ММ.ГГГГ ЧЧ:ММ')
         return
@@ -281,19 +314,12 @@ async def schedule_apply(message: Message, state: FSMContext, config):
 @router.callback_query(F.data.startswith('post_publish:'))
 async def publish_now(call: CallbackQuery, bot, config):
     post_id = int(call.data.split(':')[1])
-    post = await get_post(config.database_path, post_id)
-    if not post or post[1] != call.from_user.id:
-        await call.answer('Нет доступа', show_alert=True)
-        return
-    if not post[2]:
-        await call.answer('Сначала выберите канал для поста.', show_alert=True)
+    post = await _load_owned_post_or_deny(call, config, post_id)
+    if not post:
         return
     if not post[2] or not await has_user_channel(config.database_path, call.from_user.id, str(post[2])):
-        await call.answer('Сначала выберите канал для поста.', show_alert=True)
+        await call.answer('Сначала выберите активный канал для поста.', show_alert=True)
         return
     ok, info = await publish_post(bot, config.database_path, post_id)
-    if ok:
-        await call.message.answer('Пост опубликован.', reply_markup=user_menu(call.from_user.id in config.owner_ids))
-    else:
-        await call.message.answer(info)
+    await call.message.answer('Пост опубликован.' if ok else info, reply_markup=user_menu(call.from_user.id in config.owner_ids) if ok else None)
     await call.answer()
