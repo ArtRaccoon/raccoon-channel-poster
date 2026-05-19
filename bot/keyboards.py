@@ -6,7 +6,6 @@ def user_menu(is_owner: bool) -> ReplyKeyboardMarkup:
         [KeyboardButton(text='➕ Добавить канал')],
         [KeyboardButton(text='📋 Мои каналы')],
         [KeyboardButton(text='✍️ Создать пост')],
-        [KeyboardButton(text='🗓 Запланировать контент')],
         [KeyboardButton(text='📝 Черновики')],
         [KeyboardButton(text='⚙️ Настройки')],
         [KeyboardButton(text='❓ Помощь')],
@@ -39,7 +38,6 @@ def post_actions_inline(post_id: int, use_signature: bool = True) -> InlineKeybo
         [InlineKeyboardButton(text=f'✍️ Автоподпись: {sign}', callback_data=f'post_signature_toggle:{post_id}')],
         [InlineKeyboardButton(text='✅ Опубликовать сейчас', callback_data=f'post_publish:{post_id}')],
         [InlineKeyboardButton(text='🕒 Опубликовать позже', callback_data=f'post_schedule:{post_id}')],
-        [InlineKeyboardButton(text='📌 Добавить в очередь по расписанию', callback_data=f'post_queue:{post_id}')],
         [InlineKeyboardButton(text='💾 Сохранить как черновик', callback_data=f'post_keep:{post_id}')],
         [InlineKeyboardButton(text='❌ Отменить', callback_data=f'post_cancel:{post_id}')],
     ])
