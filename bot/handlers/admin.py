@@ -1,5 +1,9 @@
+import sqlite3
+from datetime import datetime
+from pathlib import Path
+
 from aiogram import F, Router
-from aiogram.types import Message
+from aiogram.types import FSInputFile, Message
 
 from bot.services.stats import get_admin_stats, latest_channels, latest_users
 
@@ -61,3 +65,39 @@ async def admin_proxy_status(message: Message, config):
         return
     mode = 'proxy' if config.has_proxy else 'direct'
     await message.answer(f'PROXY_URL указан: {"да" if config.has_proxy else "нет"}\nРежим: {mode}')
+
+
+@router.message(F.text == '💾 Бэкап базы')
+async def admin_backup_db(message: Message, config):
+    if not _is_owner(message, config):
+        return
+    Path('backups').mkdir(exist_ok=True)
+    ts = datetime.utcnow().strftime('%Y-%m-%d_%H-%M-%S')
+    dst = Path('backups') / f'bot_backup_{ts}.db'
+    src_conn = sqlite3.connect(config.database_path)
+    dst_conn = sqlite3.connect(dst)
+    try:
+        src_conn.backup(dst_conn)
+    finally:
+        src_conn.close(); dst_conn.close()
+    await message.answer(f'Бэкап создан: {dst}')
+    try:
+        await message.answer_document(FSInputFile(dst))
+    except Exception:
+        pass
+
+
+@router.message(F.text == '🚨 Ошибки')
+async def admin_errors(message: Message, config):
+    if not _is_owner(message, config):
+        return
+    import aiosqlite
+    async with aiosqlite.connect(config.database_path) as db:
+        rows = await (await db.execute("SELECT created_at, owner_telegram_id, channel_id, post_id, error FROM publish_logs WHERE status='error' ORDER BY id DESC LIMIT 10")).fetchall()
+    if not rows:
+        await message.answer('Ошибок нет.')
+        return
+    lines = ['Последние 10 ошибок публикации:']
+    for created_at, owner_id, channel_id, post_id, err in rows:
+        lines.append(f'{created_at} | owner={owner_id} | channel={channel_id} | post={post_id} | {(err or "")[:120]}')
+    await message.answer('\n'.join(lines))

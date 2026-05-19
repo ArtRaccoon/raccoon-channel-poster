@@ -5,3 +5,7 @@ __pycache__/
 .env
 data/*.db
 logs/*.log
+
+backups/
+backups/*.db
+*.db

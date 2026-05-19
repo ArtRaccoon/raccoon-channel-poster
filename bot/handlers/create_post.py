@@ -7,6 +7,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from bot.keyboards import post_actions_inline, user_menu
 from bot.services.channels import has_user_channel, list_user_channels
+from bot.services.publishing import publish_post, render_post_preview
 from bot.services.posts import (
     CAPTION_LIMIT,
     add_publish_log,
@@ -32,7 +33,7 @@ def _preview(media_type: str | None, text: str | None) -> str:
 
 
 async def _show_post_preview(target: Message | CallbackQuery, post: tuple):
-    _, _, channel_id, text, _, media_type, status, created_at, _, scheduled_at = post
+    _, _, channel_id, text, _, media_type, status, created_at, _, scheduled_at, _, _, _ = post
     msg = (
         f'Пост #{post[0]}\nstatus={status}\nchannel={channel_id or "-"}\n'
         f'created_at={created_at}\nscheduled_at={scheduled_at or "-"}\n{_preview(media_type, text)}'
@@ -92,6 +93,13 @@ async def choose_channel(call: CallbackQuery, config):
     await set_post_channel(config.database_path, int(post_id), channel_id)
     await call.answer('Канал выбран')
     post = await get_post(config.database_path, int(post_id))
+    channel = None
+    if post[2]:
+        from bot.services.channels import get_channel_settings
+        channel = await get_channel_settings(config.database_path, call.from_user.id, str(post[2]))
+    ok, err = await render_post_preview(call.bot, call.from_user.id, post, channel)
+    if not ok:
+        await call.message.answer(f"Preview error: {err}")
     await _show_post_preview(call, post)
 
 
@@ -284,19 +292,9 @@ async def publish_now(call: CallbackQuery, bot, config):
     if not post[2] or not await has_user_channel(config.database_path, call.from_user.id, str(post[2])):
         await call.answer('Сначала выберите канал для поста.', show_alert=True)
         return
-    try:
-        if post[5] == 'photo':
-            if post[3] and len(post[3]) > CAPTION_LIMIT:
-                await call.message.answer('Подпись к фото не должна быть длиннее 1024 символов.')
-                return
-            await bot.send_photo(chat_id=post[2], photo=post[4], caption=post[3] or None)
-        else:
-            await bot.send_message(chat_id=post[2], text=post[3] or '')
-        await set_post_status(config.database_path, post_id, 'published')
-        await add_publish_log(config.database_path, call.from_user.id, post[2], post_id, 'success')
+    ok, info = await publish_post(bot, config.database_path, post_id)
+    if ok:
         await call.message.answer('Пост опубликован.', reply_markup=user_menu(call.from_user.id in config.owner_ids))
-    except Exception as exc:
-        await set_post_status(config.database_path, post_id, 'failed')
-        await add_publish_log(config.database_path, call.from_user.id, post[2], post_id, 'error', str(exc))
-        await call.message.answer(f'Ошибка публикации: {exc}')
+    else:
+        await call.message.answer(info)
     await call.answer()

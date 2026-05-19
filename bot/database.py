@@ -19,6 +19,9 @@ SCHEMA = [
         title TEXT,
         username TEXT,
         is_active INTEGER DEFAULT 1,
+        signature TEXT,
+        default_buttons_json TEXT,
+        channel_timezone TEXT,
         created_at TEXT,
         UNIQUE(owner_telegram_id, channel_id)
     )
@@ -31,6 +34,9 @@ SCHEMA = [
         text TEXT,
         media_file_id TEXT,
         media_type TEXT,
+        buttons_json TEXT,
+        media_json TEXT,
+        album_group_id TEXT,
         status TEXT DEFAULT 'draft',
         created_at TEXT,
         published_at TEXT,
@@ -48,6 +54,26 @@ SCHEMA = [
         created_at TEXT
     )
     ''',
+    '''
+    CREATE TABLE IF NOT EXISTS signature_templates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_telegram_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        text TEXT NOT NULL,
+        created_at TEXT
+    )
+    ''',
+    '''
+    CREATE TABLE IF NOT EXISTS channel_schedules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_telegram_id INTEGER NOT NULL,
+        channel_id TEXT NOT NULL,
+        weekday INTEGER NOT NULL,
+        time TEXT NOT NULL,
+        is_active INTEGER DEFAULT 1,
+        created_at TEXT
+    )
+    ''',
 ]
 
 
@@ -62,8 +88,16 @@ async def init_db(path: str) -> None:
     async with aiosqlite.connect(path) as db:
         for stmt in SCHEMA:
             await db.execute(stmt)
+
         await _ensure_column(db, 'posts', 'media_file_id', 'ALTER TABLE posts ADD COLUMN media_file_id TEXT')
         await _ensure_column(db, 'posts', 'media_type', 'ALTER TABLE posts ADD COLUMN media_type TEXT')
         await _ensure_column(db, 'posts', 'scheduled_at', 'ALTER TABLE posts ADD COLUMN scheduled_at TEXT')
+        await _ensure_column(db, 'posts', 'buttons_json', 'ALTER TABLE posts ADD COLUMN buttons_json TEXT')
+        await _ensure_column(db, 'posts', 'media_json', 'ALTER TABLE posts ADD COLUMN media_json TEXT')
+        await _ensure_column(db, 'posts', 'album_group_id', 'ALTER TABLE posts ADD COLUMN album_group_id TEXT')
+
         await _ensure_column(db, 'channels', 'is_active', 'ALTER TABLE channels ADD COLUMN is_active INTEGER DEFAULT 1')
+        await _ensure_column(db, 'channels', 'signature', 'ALTER TABLE channels ADD COLUMN signature TEXT')
+        await _ensure_column(db, 'channels', 'default_buttons_json', 'ALTER TABLE channels ADD COLUMN default_buttons_json TEXT')
+        await _ensure_column(db, 'channels', 'channel_timezone', 'ALTER TABLE channels ADD COLUMN channel_timezone TEXT')
         await db.commit()

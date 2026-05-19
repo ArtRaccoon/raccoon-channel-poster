@@ -1,82 +1,43 @@
 # raccoon-channel-poster
 
-Telegram-бот для публикации постов в каналы пользователей (текст и фото) с черновиками и расписанием.
+Telegram posting bot (aiogram 3.x, SQLite, APScheduler) with channel mini-CMS features.
 
-## Возможности
+## New features
+- Database backup from admin panel (`💾 Бэкап базы`) via SQLite backup API.
+- URL buttons per post + default URL buttons per channel.
+- Channel signature + channel timezone fields.
+- Signature templates table (`signature_templates`).
+- Album-ready schema (`media_json`, `album_group_id`) and unified publishing service.
+- Post duplication and media/button-oriented draft controls (UI prepared).
+- Admin error feed (`🚨 Ошибки`) from `publish_logs`.
+- Scheduling foundation: `channel_schedules` table for channel slot planning.
 
-- Добавление канала и проверка прав.
-- Создание черновика из текста, фото или фото+подпись.
-- Просмотр `📝 Черновики` и `🕘 Последние посты`.
-- Inline-подтверждение: публикация, редактирование текста, сохранение, планирование, отмена.
-- Планирование публикации по времени (`TIMEZONE` из `.env`).
-- Админ-панель со статистикой и отчётами.
+## Safety and migrations
+- Safe SQLite migrations with `PRAGMA table_info` + `ALTER TABLE ADD COLUMN`.
+- Existing rows are preserved.
+- Secrets are not committed (`.env` ignored).
+- DB artifacts ignored: `*.db`, `backups/`, `backups/*.db`.
 
-## Настройка `.env`
+## Publish pipeline
+- Shared helper in `bot/services/publishing.py`:
+  - `build_post_text_with_signature`
+  - `build_url_buttons_markup`
+  - `render_post_preview`
+  - `publish_post`
+  - `classify_publish_error`
+  - `validate_post_before_publish`
+- Used by manual publish and scheduler.
 
-```bash
-cp .env.example .env
-```
+## Telegram limits
+- Text post max: 4096 chars.
+- Photo/album caption max: 1024 chars.
+- Album inline URL buttons are sent as a separate message after `send_media_group`.
 
-Поля:
-- `BOT_TOKEN`
-- `OWNER_IDS`
-- `PROXY_URL` (например `socks5://127.0.0.1:1080`)
-- `TIMEZONE`
-- `DATABASE_PATH`
-- `LOG_LEVEL`
+## systemd update flow
+1. Pull latest branch.
+2. Install/update dependencies.
+3. Restart bot service.
+4. Check `logs/bot.log`.
 
-`.env` не должен попадать в git.
-
-## PROXY_URL и sing-box
-
-Бот использует общий прокси через `AiohttpSession(proxy=PROXY_URL)` (aiogram 3.x).
-
-Важно: второй sing-box не нужен, используется уже существующий общий SOCKS5 прокси.
-
-## Как пользоваться
-
-1. Нажмите `➕ Добавить канал`, добавьте бота админом в канал.
-2. Нажмите `✍️ Создать пост`.
-3. Отправьте:
-   - текст (текстовый пост),
-   - фото без подписи (фото-пост),
-   - фото с подписью (фото+текст).
-4. Выберите канал.
-5. Выберите действие в inline-меню.
-
-### Лимиты
-
-- Подпись к фото не более 1024 символов.
-
-### Черновики
-
-- Раздел `📝 Черновики` показывает 10 последних черновиков.
-- Можно открыть, удалить, отредактировать текст/caption, опубликовать.
-
-### Расписание
-
-- Нажмите `🕒 Запланировать`.
-- Отправьте дату в формате `ДД.ММ.ГГГГ ЧЧ:ММ` (пример: `19.05.2026 14:30`).
-- Фоновый scheduler проверяет очередь каждые 30 секунд.
-
-## Права в канале
-
-- Бот: `administrator`/`creator`, с правом `can_post_messages`.
-- Пользователь: `administrator`/`creator`.
-
-## Проверка логов systemd
-
-```bash
-sudo systemctl status raccoon-channel-poster
-sudo journalctl -u raccoon-channel-poster -n 200 --no-pager
-sudo journalctl -u raccoon-channel-poster -f
-```
-
-## Запуск локально
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-./run.sh
-```
+## Proxy
+- Uses common `PROXY_URL=socks5://127.0.0.1:1080` via `AiohttpSession` (unchanged).
