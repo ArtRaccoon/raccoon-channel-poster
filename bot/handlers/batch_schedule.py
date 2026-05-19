@@ -12,6 +12,7 @@ from bot.keyboards import post_actions_inline
 from bot.services.batches import create_batch, get_batch, update_batch_status
 from bot.services.channels import get_channel_settings, has_user_channel, list_user_channels, update_channel_field
 from bot.services.posts import (
+    CAPTION_LIMIT,
     create_draft_with_batch,
     delete_batch_posts,
     get_post,
@@ -164,6 +165,9 @@ async def _save_album_batch(group_id: str, state: FSMContext, config):
     if len(media) < 2:
         return
     caption = next((m.caption for m in items if m.caption), None)
+    if caption and len(caption) > CAPTION_LIMIT:
+        await msg.answer('Подпись к альбому не должна быть длиннее 1024 символов.')
+        return
     await create_draft_with_batch(config.database_path, msg.from_user.id, channel_id, batch_id, caption, None, 'album', json.dumps(media), group_id)
     count = int(data.get('batch_count', 0)) + 1
     await state.update_data(batch_count=count)
@@ -179,6 +183,9 @@ async def batch_collect(message: Message, state: FSMContext, config):
         await state.clear()
         return
     if (message.text or '').strip().lower() == 'готово':
+        pending = [t for t in BATCH_ALBUM_TASKS.values() if not t.done()]
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
         posts = await list_batch_posts(config.database_path, message.from_user.id, batch_id)
         if not posts:
             await message.answer('Пока нет постов для планирования.')
@@ -275,6 +282,9 @@ async def batch_view(call: CallbackQuery, config):
     tz = (await get_channel_settings(config.database_path, call.from_user.id, batch[2]) or {}).get('channel_timezone') or config.timezone
     lines = ['Расписание batch:']
     for i, (pid, sat) in enumerate(rows, start=1):
+        if not sat:
+            lines.append(f'{i}. #{pid} — без времени')
+            continue
         dt = datetime.fromisoformat(sat).astimezone(ZoneInfo(tz))
         lines.append(f'{i}. #{pid} — {REV_DAY[dt.weekday()]} {dt.strftime("%H:%M")}')
     await call.message.answer('\n'.join(lines))
@@ -284,6 +294,10 @@ async def batch_view(call: CallbackQuery, config):
 @router.callback_query(F.data.startswith('batch_posts:'))
 async def batch_posts(call: CallbackQuery, config):
     batch_id = int(call.data.split(':', 1)[1])
+    batch = await get_batch(config.database_path, batch_id, call.from_user.id)
+    if not batch:
+        await call.answer('Нет доступа', show_alert=True)
+        return
     rows = await list_any_batch_posts(config.database_path, call.from_user.id, batch_id)
     kb = []
     for pid, _ in rows:

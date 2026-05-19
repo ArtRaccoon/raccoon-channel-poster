@@ -21,12 +21,27 @@ async def channels_settings(message: Message, config):
     rows = await list_user_channels(config.database_path, message.from_user.id, only_active=True)
     text = 'Активные каналы:\n' + ('\n'.join(f'- {title or "Без названия"}' for _, title, *_ in rows) if rows else 'Нет каналов.')
     kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='➕ Добавить канал', callback_data='settings_add_channel')],
         [InlineKeyboardButton(text='📋 Список каналов', callback_data='set_channels_list')],
         [InlineKeyboardButton(text='❌ Удалить/отключить канал', callback_data='set_channels_disable')],
         [InlineKeyboardButton(text='🧪 Проверить доступ', callback_data='set_channels_check')],
     ])
     await message.answer(text, reply_markup=kb)
 
+
+
+
+@router.callback_query(F.data == 'settings_add_channel')
+async def settings_add_channel(call: CallbackQuery, state: FSMContext):
+    from bot.states import AddChannelState
+    await state.set_state(AddChannelState.waiting_channel_ref)
+    await call.message.answer(
+        '1. Добавьте этого бота в ваш канал.\n'
+        '2. Выдайте ему права администратора.\n'
+        '3. Разрешите публиковать сообщения.\n'
+        '4. Отправьте username канала, например @my_channel.'
+    )
+    await call.answer()
 
 @router.callback_query(F.data == 'set_channels_list')
 async def set_channels_list(call: CallbackQuery, config):
