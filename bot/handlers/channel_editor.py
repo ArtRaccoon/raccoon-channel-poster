@@ -44,7 +44,7 @@ async def inject_links_into_channel_post(message: Message, bot, config) -> None:
         return
 
     if message.text:
-        result = append_links_block_checked(message.text, links_block, limit=TEXT_LIMIT)
+        result = append_links_block_checked(message.text, links_block, original_html=message.html_text, limit=TEXT_LIMIT)
         if not result.changed:
             await add_edit_log(config.database_path, owner_id, channel_id, message_id, result.reason or 'skipped')
             if result.reason == 'error_limit':
@@ -60,7 +60,7 @@ async def inject_links_into_channel_post(message: Message, bot, config) -> None:
         return
 
     if message.caption:
-        result = append_links_block_checked(message.caption, links_block, limit=CAPTION_LIMIT)
+        result = append_links_block_checked(message.caption, links_block, original_html=message.html_caption, limit=CAPTION_LIMIT)
         if not result.changed:
             await add_edit_log(config.database_path, owner_id, channel_id, message_id, result.reason or 'skipped')
             if result.reason == 'error_limit':

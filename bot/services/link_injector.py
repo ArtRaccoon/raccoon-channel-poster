@@ -25,25 +25,34 @@ def build_links_quote_block(links_block: str) -> str:
     return '<blockquote>\n' + '\n'.join(escaped_lines) + '\n</blockquote>'
 
 
-def append_links_block(original_text: str, links_block: str) -> str:
-    result = append_links_block_checked(original_text, links_block)
+def append_links_block(original_text: str, links_block: str, original_html: str | None = None) -> str:
+    result = append_links_block_checked(original_text, links_block, original_html=original_html)
     return result.text
 
 
-def append_links_block_checked(original_text: str, links_block: str, *, limit: int | None = None) -> AppendResult:
-    """Escape original text and append the links block once.
+def append_links_block_checked(
+    original_text: str,
+    links_block: str,
+    *,
+    original_html: str | None = None,
+    limit: int | None = None,
+) -> AppendResult:
+    """Append the links block once while preserving existing Telegram HTML when available.
 
-    Returns changed=False when there is no links block, marker already exists,
-    or the resulting text would exceed the provided Telegram limit.
+    original_text is the plain text/caption used for duplicate marker checks.
+    original_html is message.html_text/html_caption when Telegram entities are available;
+    if absent, the plain original_text is escaped before appending the block.
     """
     original_text = original_text or ''
+    source_html = original_html if original_html is not None else escape(original_text)
+
     if not (links_block or '').strip():
-        return AppendResult(original_text, False, 'skipped_no_links')
-    if LINKS_BLOCK_MARKER in original_text:
-        return AppendResult(original_text, False, 'skipped_already_has_block')
+        return AppendResult(source_html, False, 'skipped_no_links')
+    if LINKS_BLOCK_MARKER in original_text or LINKS_BLOCK_MARKER in source_html:
+        return AppendResult(source_html, False, 'skipped_already_has_block')
 
     quote_block = build_links_quote_block(links_block)
-    new_text = f'{escape(original_text)}\n\n{quote_block}' if original_text else quote_block
+    new_text = f'{source_html}\n\n{quote_block}' if source_html else quote_block
     if limit is not None and len(new_text) > limit:
-        return AppendResult(original_text, False, 'error_limit')
+        return AppendResult(source_html, False, 'error_limit')
     return AppendResult(new_text, True)
