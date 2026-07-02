@@ -22,6 +22,8 @@ SCHEMA = [
         signature TEXT,
         default_buttons_json TEXT,
         channel_timezone TEXT,
+        links_block TEXT,
+        auto_edit_enabled INTEGER DEFAULT 1,
         created_at TEXT,
         UNIQUE(owner_telegram_id, channel_id)
     )
@@ -45,6 +47,17 @@ SCHEMA = [
         created_at TEXT,
         published_at TEXT,
         scheduled_at TEXT
+    )
+    ''',
+    '''
+    CREATE TABLE IF NOT EXISTS edit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_telegram_id INTEGER,
+        channel_id TEXT,
+        message_id INTEGER,
+        status TEXT,
+        error TEXT,
+        created_at TEXT
     )
     ''',
     '''
@@ -119,5 +132,7 @@ async def init_db(path: str) -> None:
         await _ensure_column(db, 'channels', 'signature', 'ALTER TABLE channels ADD COLUMN signature TEXT')
         await _ensure_column(db, 'channels', 'default_buttons_json', 'ALTER TABLE channels ADD COLUMN default_buttons_json TEXT')
         await _ensure_column(db, 'channels', 'channel_timezone', 'ALTER TABLE channels ADD COLUMN channel_timezone TEXT')
+        await _ensure_column(db, 'channels', 'links_block', 'ALTER TABLE channels ADD COLUMN links_block TEXT')
+        await _ensure_column(db, 'channels', 'auto_edit_enabled', 'ALTER TABLE channels ADD COLUMN auto_edit_enabled INTEGER DEFAULT 1')
         await db.commit()
 

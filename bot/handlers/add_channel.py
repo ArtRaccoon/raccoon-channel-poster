@@ -15,7 +15,7 @@ async def start_add_channel(message: Message, state: FSMContext):
     await message.answer(
         '1. Добавьте этого бота в ваш канал.\n'
         '2. Выдайте ему права администратора.\n'
-        '3. Разрешите публиковать сообщения.\n'
+        '3. Включите право редактирования сообщений.\n'
         '4. Отправьте username канала, например @my_channel.'
     )
 
@@ -43,8 +43,9 @@ async def handle_channel_ref(message: Message, state: FSMContext, bot, config):
         await message.answer('Бот не администратор в этом канале.')
         return
 
-    if getattr(bot_member, 'can_post_messages', True) is False:
-        await message.answer('У бота нет прав на публикацию в канале.')
+    can_edit = getattr(bot_member, 'can_edit_messages', False) is True or bot_member.status == 'creator'
+    if not can_edit:
+        await message.answer('Бот добавлен, но не может редактировать посты. Выдайте право редактирования сообщений.')
         return
 
     try:

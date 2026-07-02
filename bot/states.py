@@ -26,3 +26,4 @@ class CreatePostState(StatesGroup):
     waiting_batch_review = State()
     waiting_settings_schedule_text = State()
     waiting_settings_signature_text = State()
+    waiting_links_block_text = State()

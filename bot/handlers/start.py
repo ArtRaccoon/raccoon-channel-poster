@@ -12,4 +12,4 @@ router = Router()
 async def cmd_start(message: Message, config):
     await upsert_user(config.database_path, message.from_user.id, message.from_user.username, message.from_user.first_name)
     is_owner = message.from_user.id in config.owner_ids
-    await message.answer('Привет! Я помогу публиковать посты в ваши Telegram-каналы.', reply_markup=user_menu(is_owner))
+    await message.answer('Привет! Я автоматически добавлю блок полезных ссылок в новые посты ваших Telegram-каналов.', reply_markup=user_menu(is_owner))

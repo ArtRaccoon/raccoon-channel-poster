@@ -9,8 +9,8 @@ def _now() -> str:
 async def add_channel(db_path: str, owner_telegram_id: int, channel_id: str, title: str | None, username: str | None) -> None:
     async with aiosqlite.connect(db_path) as db:
         await db.execute(
-            '''INSERT OR REPLACE INTO channels (owner_telegram_id, channel_id, title, username, is_active, created_at)
-               VALUES (?, ?, ?, ?, 1, ?)''',
+            '''INSERT OR REPLACE INTO channels (owner_telegram_id, channel_id, title, username, is_active, auto_edit_enabled, created_at)
+               VALUES (?, ?, ?, ?, 1, 1, ?)''',
             (owner_telegram_id, channel_id, title, username, _now()),
         )
         await db.commit()
@@ -18,7 +18,7 @@ async def add_channel(db_path: str, owner_telegram_id: int, channel_id: str, tit
 
 async def list_user_channels(db_path: str, owner_telegram_id: int, only_active: bool = True):
     async with aiosqlite.connect(db_path) as db:
-        query = 'SELECT channel_id, title, username, is_active FROM channels WHERE owner_telegram_id=?'
+        query = 'SELECT channel_id, title, username, is_active, auto_edit_enabled FROM channels WHERE owner_telegram_id=?'
         if only_active:
             query += ' AND is_active=1'
         query += ' ORDER BY id DESC'
@@ -44,17 +44,36 @@ async def has_user_channel(db_path: str, owner_telegram_id: int, channel_id: str
 async def get_channel_settings(db_path: str, owner_telegram_id: int, channel_id: str):
     async with aiosqlite.connect(db_path) as db:
         row = await (await db.execute(
-            "SELECT signature, default_buttons_json, channel_timezone FROM channels WHERE owner_telegram_id=? AND channel_id=? AND is_active=1",
+            '''SELECT signature, default_buttons_json, channel_timezone, links_block, auto_edit_enabled
+               FROM channels WHERE owner_telegram_id=? AND channel_id=? AND is_active=1''',
             (owner_telegram_id, channel_id),
         )).fetchone()
         if not row:
             return None
-        return {"signature": row[0], "default_buttons_json": row[1], "channel_timezone": row[2]}
+        return {"signature": row[0], "default_buttons_json": row[1], "channel_timezone": row[2], "links_block": row[3], "auto_edit_enabled": row[4]}
 
 
-async def update_channel_field(db_path: str, owner_telegram_id: int, channel_id: str, field: str, value: str | None):
-    if field not in {"signature", "default_buttons_json", "channel_timezone"}:
+async def update_channel_field(db_path: str, owner_telegram_id: int, channel_id: str, field: str, value):
+    if field not in {"signature", "default_buttons_json", "channel_timezone", "links_block", "auto_edit_enabled"}:
         raise ValueError("unsupported field")
     async with aiosqlite.connect(db_path) as db:
         await db.execute(f"UPDATE channels SET {field}=? WHERE owner_telegram_id=? AND channel_id=?", (value, owner_telegram_id, channel_id))
         await db.commit()
+
+
+async def get_active_channel_by_chat_id(db_path: str, channel_id: str):
+    async with aiosqlite.connect(db_path) as db:
+        row = await (await db.execute(
+            '''SELECT owner_telegram_id, channel_id, title, links_block, auto_edit_enabled
+               FROM channels WHERE channel_id=? AND is_active=1 ORDER BY id DESC LIMIT 1''',
+            (channel_id,),
+        )).fetchone()
+        if not row:
+            return None
+        return {
+            'owner_telegram_id': row[0],
+            'channel_id': row[1],
+            'title': row[2],
+            'links_block': row[3],
+            'auto_edit_enabled': row[4],
+        }
