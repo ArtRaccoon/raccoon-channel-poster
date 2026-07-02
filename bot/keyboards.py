@@ -3,7 +3,6 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardBu
 
 def user_menu(is_owner: bool) -> ReplyKeyboardMarkup:
     rows = [
-        [KeyboardButton(text='✍️ Создать пост')],
         [KeyboardButton(text='⚙️ Настройки')],
     ]
     if is_owner:
@@ -17,9 +16,10 @@ def admin_menu() -> ReplyKeyboardMarkup:
             [KeyboardButton(text='📊 Статистика')],
             [KeyboardButton(text='📈 Отчёт за 24ч'), KeyboardButton(text='📈 Отчёт за 7д')],
             [KeyboardButton(text='👥 Пользователи')],
-            [KeyboardButton(text='📣 Каналы')],
+            [KeyboardButton(text='📣 Все каналы')],
             [KeyboardButton(text='🌐 Прокси-статус')],
             [KeyboardButton(text='💾 Бэкап базы'), KeyboardButton(text='🚨 Ошибки')],
+            [KeyboardButton(text='🧾 Логи редактирования')],
             [KeyboardButton(text='⬅️ Назад')],
         ],
         resize_keyboard=True,
@@ -41,8 +41,9 @@ def settings_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text='📣 Каналы')],
-            [KeyboardButton(text='🗓 Расписание каналов')],
-            [KeyboardButton(text='✍️ Автоподпись')],
+            [KeyboardButton(text='🔗 Полезные ссылки')],
+            [KeyboardButton(text='✅ Автообработка: Вкл/Выкл')],
+            [KeyboardButton(text='🧪 Тест редактирования')],
             [KeyboardButton(text='⬅️ Назад')],
         ],
         resize_keyboard=True,

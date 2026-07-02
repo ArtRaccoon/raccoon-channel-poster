@@ -48,7 +48,7 @@ async def admin_users(message: Message, config):
     await message.answer('\n'.join(text))
 
 
-@router.message(F.text == '📣 Каналы')
+@router.message(F.text == '📣 Все каналы')
 async def admin_channels(message: Message, config):
     if not _is_owner(message, config):
         return
@@ -100,4 +100,19 @@ async def admin_errors(message: Message, config):
     lines = ['Последние 10 ошибок публикации:']
     for created_at, owner_id, channel_id, post_id, err in rows:
         lines.append(f'{created_at} | owner={owner_id} | channel={channel_id} | post={post_id} | {(err or "")[:120]}')
+    await message.answer('\n'.join(lines))
+
+
+@router.message(F.text == '🧾 Логи редактирования')
+async def admin_edit_logs(message: Message, config):
+    if not _is_owner(message, config):
+        return
+    from bot.services.edit_logs import list_recent_edit_logs
+    rows = await list_recent_edit_logs(config.database_path, 10)
+    if not rows:
+        await message.answer('Логов редактирования пока нет.')
+        return
+    lines = ['Последние 10 логов редактирования:']
+    for created_at, owner_id, channel_id, message_id, status, error in rows:
+        lines.append(f'{created_at} | owner={owner_id} | channel={channel_id} | msg={message_id} | {status} | {(error or "")[:120]}')
     await message.answer('\n'.join(lines))
