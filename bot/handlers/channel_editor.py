@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+from html import escape
 
 from aiogram import Router
 from aiogram.types import Message
+from aiogram.utils.text_decorations import html_decoration
 
 from bot.services.channels import get_active_channel_by_chat_id
 from bot.services.edit_logs import add_edit_log
@@ -18,6 +20,22 @@ CAPTION_MEDIA_FIELDS = ('photo', 'video', 'animation', 'document', 'audio', 'voi
 
 def _supports_caption(message: Message) -> bool:
     return any(getattr(message, field, None) for field in CAPTION_MEDIA_FIELDS)
+
+
+def _message_text_html(message: Message) -> str:
+    text = message.text or ''
+    entities = message.entities or []
+    if entities:
+        return html_decoration.unparse(text, entities)
+    return escape(text)
+
+
+def _message_caption_html(message: Message) -> str:
+    caption = message.caption or ''
+    entities = message.caption_entities or []
+    if entities:
+        return html_decoration.unparse(caption, entities)
+    return escape(caption)
 
 
 async def _notify_owner(bot, owner_id: int | None, text: str) -> None:
@@ -51,7 +69,7 @@ async def inject_links_into_channel_post(message: Message, bot, config) -> None:
         return
 
     if message.text:
-        result = append_links_block_checked(message.text, links_block, original_html=message.html_text, limit=TEXT_LIMIT)
+        result = append_links_block_checked(message.text, links_block, original_html=_message_text_html(message), limit=TEXT_LIMIT)
         if not result.changed:
             await add_edit_log(config.database_path, owner_id, channel_id, message_id, result.reason or 'skipped')
             if result.reason == 'error_limit':
@@ -67,7 +85,7 @@ async def inject_links_into_channel_post(message: Message, bot, config) -> None:
         return
 
     if message.caption:
-        result = append_links_block_checked(message.caption, links_block, original_html=message.html_caption, limit=CAPTION_LIMIT)
+        result = append_links_block_checked(message.caption, links_block, original_html=_message_caption_html(message), limit=CAPTION_LIMIT)
         if not result.changed:
             await add_edit_log(config.database_path, owner_id, channel_id, message_id, result.reason or 'skipped')
             if result.reason == 'error_limit':
