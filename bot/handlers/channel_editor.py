@@ -24,6 +24,9 @@ async def _notify_owner(bot, owner_id: int | None, text: str) -> None:
 
 @router.channel_post()
 async def inject_links_into_channel_post(message: Message, bot, config) -> None:
+    if message.from_user and message.from_user.id == bot.id:
+        return
+
     channel_id = str(message.chat.id)
     message_id = message.message_id
     channel = await get_active_channel_by_chat_id(config.database_path, channel_id)
