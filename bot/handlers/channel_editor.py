@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from html import escape
 
@@ -14,7 +15,9 @@ from bot.services.link_injector import CAPTION_LIMIT, TEXT_LIMIT, append_links_b
 router = Router()
 logger = logging.getLogger(__name__)
 
-PROCESSED_MEDIA_GROUPS: set[str] = set()
+MEDIA_GROUP_BUFFER: dict[str, list[Message]] = {}
+MEDIA_GROUP_TASKS: dict[str, asyncio.Task] = {}
+MEDIA_GROUP_DELAY_SECONDS = 1.7
 CAPTION_MEDIA_FIELDS = ('photo', 'video', 'animation', 'document', 'audio', 'voice')
 
 
@@ -47,9 +50,100 @@ async def _notify_owner(bot, owner_id: int | None, text: str) -> None:
         logger.warning('Failed to notify owner_id=%s: %s', owner_id, exc)
 
 
+async def finalize_media_group(key: str, bot, config) -> None:
+    try:
+        await asyncio.sleep(MEDIA_GROUP_DELAY_SECONDS)
+        messages = MEDIA_GROUP_BUFFER.pop(key, [])
+        MEDIA_GROUP_TASKS.pop(key, None)
+        logger.info('media_group_collected key=%s count=%s', key, len(messages))
+        if not messages:
+            return
+
+        first_message = messages[0]
+        channel_id = str(first_message.chat.id)
+        channel = await get_active_channel_by_chat_id(config.database_path, channel_id)
+        if not channel:
+            return
+
+        owner_id = channel['owner_telegram_id']
+        if not channel.get('auto_edit_enabled', True):
+            await add_edit_log(
+                config.database_path,
+                owner_id,
+                channel_id,
+                first_message.message_id,
+                'skipped_auto_disabled',
+            )
+            return
+
+        links_block = channel.get('links_block') or ''
+        if not links_block.strip():
+            await add_edit_log(config.database_path, owner_id, channel_id, first_message.message_id, 'skipped_no_links')
+            return
+
+        caption_message = next((album_message for album_message in messages if album_message.caption), None)
+        logger.info('media_group_caption_found=%s', caption_message is not None)
+
+        if caption_message:
+            edit_message = caption_message
+            original_text = caption_message.caption or ''
+            original_html = _message_caption_html(caption_message)
+        else:
+            edit_message = next((album_message for album_message in messages if _supports_caption(album_message)), None)
+            if not edit_message:
+                await add_edit_log(
+                    config.database_path,
+                    owner_id,
+                    channel_id,
+                    first_message.message_id,
+                    'skipped_unsupported_media',
+                )
+                return
+            original_text = ''
+            original_html = ''
+
+        logger.info('media_group_edit_message_id=%s', edit_message.message_id)
+        result = append_links_block_checked(original_text, links_block, original_html=original_html, limit=CAPTION_LIMIT)
+        if not result.changed:
+            await add_edit_log(config.database_path, owner_id, channel_id, edit_message.message_id, result.reason or 'skipped')
+            if result.reason == 'error_limit':
+                logger.warning('Caption limit exceeded for channel_id=%s message_id=%s', channel_id, edit_message.message_id)
+                await _notify_owner(bot, owner_id, 'Не удалось добавить ссылки: превышен лимит caption.')
+            return
+
+        try:
+            await bot.edit_message_caption(
+                chat_id=edit_message.chat.id,
+                message_id=edit_message.message_id,
+                caption=result.text,
+                parse_mode='HTML',
+            )
+            await add_edit_log(config.database_path, owner_id, channel_id, edit_message.message_id, 'success')
+        except Exception as exc:
+            logger.exception(
+                'Telegram edit_message_caption failed for media_group key=%s channel_id=%s message_id=%s',
+                key,
+                channel_id,
+                edit_message.message_id,
+            )
+            await add_edit_log(config.database_path, owner_id, channel_id, edit_message.message_id, 'error_telegram', str(exc))
+    except Exception:
+        logger.exception('Failed to finalize media_group key=%s', key)
+    finally:
+        MEDIA_GROUP_BUFFER.pop(key, None)
+        MEDIA_GROUP_TASKS.pop(key, None)
+
+
 @router.channel_post()
 async def inject_links_into_channel_post(message: Message, bot, config) -> None:
     if message.from_user and message.from_user.id == bot.id:
+        return
+
+    if message.media_group_id:
+        media_group_key = f'{message.chat.id}:{message.media_group_id}'
+        MEDIA_GROUP_BUFFER.setdefault(media_group_key, []).append(message)
+        if media_group_key not in MEDIA_GROUP_TASKS:
+            MEDIA_GROUP_TASKS[media_group_key] = asyncio.create_task(finalize_media_group(media_group_key, bot, config))
         return
 
     channel_id = str(message.chat.id)
@@ -101,19 +195,6 @@ async def inject_links_into_channel_post(message: Message, bot, config) -> None:
         return
 
     if _supports_caption(message):
-        if message.media_group_id:
-            media_group_key = f'{message.chat.id}:{message.media_group_id}'
-            if media_group_key in PROCESSED_MEDIA_GROUPS:
-                await add_edit_log(
-                    config.database_path,
-                    owner_id,
-                    channel_id,
-                    message_id,
-                    'skipped_media_group_already_processed',
-                )
-                return
-            PROCESSED_MEDIA_GROUPS.add(media_group_key)
-
         result = append_links_block_checked('', links_block, original_html='', limit=CAPTION_LIMIT)
         if not result.changed:
             await add_edit_log(config.database_path, owner_id, channel_id, message_id, result.reason or 'skipped')
