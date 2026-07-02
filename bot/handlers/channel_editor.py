@@ -12,6 +12,13 @@ from bot.services.link_injector import CAPTION_LIMIT, TEXT_LIMIT, append_links_b
 router = Router()
 logger = logging.getLogger(__name__)
 
+PROCESSED_MEDIA_GROUPS: set[str] = set()
+CAPTION_MEDIA_FIELDS = ('photo', 'video', 'animation', 'document', 'audio', 'voice')
+
+
+def _supports_caption(message: Message) -> bool:
+    return any(getattr(message, field, None) for field in CAPTION_MEDIA_FIELDS)
+
 
 async def _notify_owner(bot, owner_id: int | None, text: str) -> None:
     if owner_id is None:
@@ -75,5 +82,34 @@ async def inject_links_into_channel_post(message: Message, bot, config) -> None:
             await add_edit_log(config.database_path, owner_id, channel_id, message_id, 'error_telegram', str(exc))
         return
 
+    if _supports_caption(message):
+        if message.media_group_id:
+            media_group_key = f'{message.chat.id}:{message.media_group_id}'
+            if media_group_key in PROCESSED_MEDIA_GROUPS:
+                await add_edit_log(
+                    config.database_path,
+                    owner_id,
+                    channel_id,
+                    message_id,
+                    'skipped_media_group_already_processed',
+                )
+                return
+            PROCESSED_MEDIA_GROUPS.add(media_group_key)
+
+        result = append_links_block_checked('', links_block, original_html='', limit=CAPTION_LIMIT)
+        if not result.changed:
+            await add_edit_log(config.database_path, owner_id, channel_id, message_id, result.reason or 'skipped')
+            if result.reason == 'error_limit':
+                logger.warning('Caption limit exceeded for channel_id=%s message_id=%s', channel_id, message_id)
+                await _notify_owner(bot, owner_id, 'Не удалось добавить ссылки: превышен лимит caption.')
+            return
+        try:
+            await bot.edit_message_caption(chat_id=message.chat.id, message_id=message_id, caption=result.text, parse_mode='HTML')
+            await add_edit_log(config.database_path, owner_id, channel_id, message_id, 'success')
+        except Exception as exc:
+            logger.exception('Telegram edit_message_caption failed for channel_id=%s message_id=%s', channel_id, message_id)
+            await add_edit_log(config.database_path, owner_id, channel_id, message_id, 'error_telegram', str(exc))
+        return
+
     logger.info('Unsupported channel post without text/caption: channel_id=%s message_id=%s', channel_id, message_id)
-    await add_edit_log(config.database_path, owner_id, channel_id, message_id, 'skipped_no_text_or_caption')
+    await add_edit_log(config.database_path, owner_id, channel_id, message_id, 'skipped_unsupported_media')
