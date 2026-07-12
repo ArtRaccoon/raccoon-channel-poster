@@ -5,14 +5,41 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from collections.abc import Collection
 
-from aiogram import Bot, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message
+from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup
 from .database import Database
 from .models import ChannelSettings
 from .publisher import TemporaryPublishError, publish_next
 
 log=logging.getLogger(__name__)
+
+MAIN_MENU_BUTTONS = [
+    ["📊 Статус", "📚 Очередь"],
+    ["▶️ Опубликовать сейчас"],
+    ["⏸ Пауза", "▶️ Продолжить"],
+    ["⚙️ Канал", "🔗 Настроить канал"],
+    ["🗑 Очистить очередь"],
+    ["❓ Помощь"],
+]
+
+CLEAR_CONFIRM_BUTTONS = [
+    ["✅ Да, очистить очередь"],
+    ["❌ Отмена"],
+]
+
+def _reply_keyboard(rows: list[list[str]]) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=text) for text in row] for row in rows],
+        resize_keyboard=True,
+    )
+
+def main_menu_keyboard() -> ReplyKeyboardMarkup:
+    return _reply_keyboard(MAIN_MENU_BUTTONS)
+
+def clear_confirm_keyboard() -> ReplyKeyboardMarkup:
+    return _reply_keyboard(CLEAR_CONFIRM_BUTTONS)
+
 
 def is_image_document(message: Message) -> bool:
     return bool(message.document and (message.document.mime_type or "").startswith("image/"))
@@ -84,91 +111,182 @@ def create_router(db:Database, bot:Bot, interval_hours:float, timezone_name:str,
         if message.from_user and message.from_user.id in admin_ids: return True
         await message.answer("Нет доступа."); return False
 
+    async def answer_with_menu(message: Message, text: str, **kwargs) -> None:
+        await message.answer(text, reply_markup=main_menu_keyboard(), **kwargs)
+
+    async def show_help(message: Message) -> None:
+        await answer_with_menu(message, "/start /help /status /channel /setchannel /removechannel /queue /pause /resume /next /skip /clear confirm")
+
+    async def show_status(message: Message) -> None:
+        paused=await db.paused(); q=await db.count_queued()
+        await answer_with_menu(message, f"Автопубликация: {'пауза' if paused else 'включена'}\nОчередь: {q}\nСледующая публикация: {format_time(await db.get_state('next_run_at'), timezone_name)}\nПоследняя успешная: {format_time(await db.get_state('last_success_at'), timezone_name)}\nПоследняя ошибка: {await db.get_state('last_error') or '—'}")
+
+    async def show_queue(message: Message) -> None:
+        q=await db.count_queued(); days=q*interval_hours/24
+        await answer_with_menu(message, f"В очереди: {q}\nХватит примерно на: {days:.1f} дн.")
+
+    async def pause_autoposting(message: Message) -> None:
+        await db.set_paused(True); log.info("Admin paused autoposting"); await answer_with_menu(message, "Автопубликация на паузе.")
+
+    async def resume_autoposting(message: Message) -> None:
+        await db.set_paused(False); log.info("Admin resumed autoposting"); await answer_with_menu(message, "Автопубликация возобновлена.")
+
+    async def show_channel(message: Message) -> None:
+        channel_settings = await db.get_channel()
+        if not channel_settings:
+            await answer_with_menu(message, "Канал пока не настроен.")
+            return
+        await answer_with_menu(message, _format_channel(channel_settings, interval_hours, await db.count_queued()))
+
+    async def start_setchannel(message: Message) -> None:
+        await db.set_state(SETCHANNEL_STATE, str(message.from_user.id))
+        await answer_with_menu(message, "Перешлите любое сообщение из канала или отправьте @username канала.")
+
+    async def publish_next_now(message: Message) -> None:
+        was_paused=await db.paused()
+        channel_settings = await db.get_channel()
+        if not channel_settings:
+            await answer_with_menu(message, "Канал пока не настроен.")
+            return
+        try:
+            ok=await publish_next(db, bot, channel_settings.channel_id)
+        except TemporaryPublishError as exc:
+            await answer_with_menu(message, f"Временная ошибка публикации: {exc}"); return
+        if ok and not was_paused:
+            from datetime import timedelta, timezone
+            await db.set_state("next_run_at", (datetime.now(timezone.utc)+timedelta(hours=interval_hours)).isoformat())
+        await answer_with_menu(message, "Опубликовано." if ok else "Очередь пуста.")
+
+    async def ask_clear_confirmation(message: Message) -> None:
+        await message.answer("Очистить очередь?", reply_markup=clear_confirm_keyboard())
+
+    async def confirm_clear_queue(message: Message) -> None:
+        count=await db.clear_pending(); await answer_with_menu(message, f"Очищено/пропущено элементов: {count}")
+
+    async def cancel_clear_queue(message: Message) -> None:
+        await answer_with_menu(message, "Очистка отменена")
+
     @router.message(Command("start"))
     async def start(message:Message):
         if not await auth(message): return
         if not await db.get_channel():
-            await message.answer("Канал пока не настроен.\n\nДобавьте меня администратором канала.\n\nПосле этого:\n\n• перешлите любое сообщение из канала\n\nили\n\n• отправьте @username канала.")
+            await answer_with_menu(message, "Канал пока не настроен.\n\nДобавьте меня администратором канала.\n\nПосле этого:\n\n• перешлите любое сообщение из канала\n\nили\n\n• отправьте @username канала.")
             return
-        await message.answer("Отправляйте медиа — оно автоматически добавляется в очередь. Публикация идёт каждые 3 часа.")
+        await answer_with_menu(message, "Отправляйте медиа — оно автоматически добавляется в очередь. Публикация идёт каждые 3 часа.")
 
     @router.message(Command("help"))
     async def help_cmd(message:Message):
         if not await auth(message): return
-        await message.answer("/start /help /status /channel /setchannel /removechannel /queue /pause /resume /next /skip /clear confirm")
+        await show_help(message)
 
     @router.message(Command("setchannel"))
     async def setchannel(message:Message):
         if not await auth(message): return
-        await db.set_state(SETCHANNEL_STATE, str(message.from_user.id))
-        await message.answer("Перешлите любое сообщение из канала или отправьте @username канала.")
+        await start_setchannel(message)
 
     @router.message(Command("channel"))
     async def channel(message:Message):
         if not await auth(message): return
-        channel_settings = await db.get_channel()
-        if not channel_settings:
-            await message.answer("Канал пока не настроен.")
-            return
-        await message.answer(_format_channel(channel_settings, interval_hours, await db.count_queued()))
+        await show_channel(message)
 
     @router.message(Command("removechannel"))
     async def removechannel(message:Message):
         if not await auth(message): return
         await db.remove_channel()
         await db.set_state(SETCHANNEL_STATE, "")
-        await message.answer("Канал удалён. Очередь сохранена.")
+        await answer_with_menu(message, "Канал удалён. Очередь сохранена.")
 
     @router.message(Command("status"))
     async def status(message:Message):
         if not await auth(message): return
-        paused=await db.paused(); q=await db.count_queued()
-        await message.answer(f"Автопубликация: {'пауза' if paused else 'включена'}\nОчередь: {q}\nСледующая публикация: {format_time(await db.get_state('next_run_at'), timezone_name)}\nПоследняя успешная: {format_time(await db.get_state('last_success_at'), timezone_name)}\nПоследняя ошибка: {await db.get_state('last_error') or '—'}")
+        await show_status(message)
 
     @router.message(Command("queue"))
     async def queue(message:Message):
         if not await auth(message): return
-        q=await db.count_queued(); days=q*interval_hours/24
-        await message.answer(f"В очереди: {q}\nХватит примерно на: {days:.1f} дн.")
+        await show_queue(message)
 
     @router.message(Command("pause"))
     async def pause(message:Message):
         if not await auth(message): return
-        await db.set_paused(True); log.info("Admin paused autoposting"); await message.answer("Автопубликация на паузе.")
+        await pause_autoposting(message)
 
     @router.message(Command("resume"))
     async def resume(message:Message):
         if not await auth(message): return
-        await db.set_paused(False); log.info("Admin resumed autoposting"); await message.answer("Автопубликация возобновлена.")
+        await resume_autoposting(message)
 
     @router.message(Command("next"))
     async def next_cmd(message:Message):
         if not await auth(message): return
-        was_paused=await db.paused()
-        channel_settings = await db.get_channel()
-        if not channel_settings:
-            await message.answer("Канал пока не настроен.")
-            return
-        try:
-            ok=await publish_next(db, bot, channel_settings.channel_id)
-        except TemporaryPublishError as exc:
-            await message.answer(f"Временная ошибка публикации: {exc}"); return
-        if ok and not was_paused:
-            from datetime import timedelta, timezone
-            await db.set_state("next_run_at", (datetime.now(timezone.utc)+timedelta(hours=interval_hours)).isoformat())
-        await message.answer("Опубликовано." if ok else "Очередь пуста.")
+        await publish_next_now(message)
 
     @router.message(Command("skip"))
     async def skip(message:Message):
         if not await auth(message): return
-        await message.answer("Первый элемент пропущен." if await db.skip_next() else "Очередь пуста.")
+        await answer_with_menu(message, "Первый элемент пропущен." if await db.skip_next() else "Очередь пуста.")
 
     @router.message(Command("clear"))
     async def clear(message:Message, command:CommandObject):
         if not await auth(message): return
         if (command.args or "").strip() != "confirm":
-            await message.answer("Для очистки очереди отправьте: /clear confirm"); return
-        count=await db.clear_pending(); await message.answer(f"Пропущено элементов: {count}")
+            await ask_clear_confirmation(message); return
+        await confirm_clear_queue(message)
+
+    @router.message(F.text == "📊 Статус")
+    async def status_button(message:Message):
+        if not await auth(message): return
+        await show_status(message)
+
+    @router.message(F.text == "📚 Очередь")
+    async def queue_button(message:Message):
+        if not await auth(message): return
+        await show_queue(message)
+
+    @router.message(F.text == "▶️ Опубликовать сейчас")
+    async def next_button(message:Message):
+        if not await auth(message): return
+        await publish_next_now(message)
+
+    @router.message(F.text == "⏸ Пауза")
+    async def pause_button(message:Message):
+        if not await auth(message): return
+        await pause_autoposting(message)
+
+    @router.message(F.text == "▶️ Продолжить")
+    async def resume_button(message:Message):
+        if not await auth(message): return
+        await resume_autoposting(message)
+
+    @router.message(F.text == "⚙️ Канал")
+    async def channel_button(message:Message):
+        if not await auth(message): return
+        await show_channel(message)
+
+    @router.message(F.text == "🔗 Настроить канал")
+    async def setchannel_button(message:Message):
+        if not await auth(message): return
+        await start_setchannel(message)
+
+    @router.message(F.text == "🗑 Очистить очередь")
+    async def clear_button(message:Message):
+        if not await auth(message): return
+        await ask_clear_confirmation(message)
+
+    @router.message(F.text == "✅ Да, очистить очередь")
+    async def clear_confirm_button(message:Message):
+        if not await auth(message): return
+        await confirm_clear_queue(message)
+
+    @router.message(F.text == "❌ Отмена")
+    async def clear_cancel_button(message:Message):
+        if not await auth(message): return
+        await cancel_clear_queue(message)
+
+    @router.message(F.text == "❓ Помощь")
+    async def help_button(message:Message):
+        if not await auth(message): return
+        await show_help(message)
 
     @router.message()
     async def media(message:Message):
@@ -188,7 +306,7 @@ def create_router(db:Database, bot:Bot, interval_hours:float, timezone_name:str,
                 await message.answer("❌\n\nДобавьте меня администратором\nс правом публикации сообщений."); return
             await db.set_channel(channel_settings)
             await db.set_state(SETCHANNEL_STATE, "")
-            await message.answer("✅ Канал успешно подключён.\n\n" + _format_channel(channel_settings))
+            await answer_with_menu(message, "✅ Канал успешно подключён.\n\n" + _format_channel(channel_settings))
             return
         payload=media_payload(message)
         if not payload:
