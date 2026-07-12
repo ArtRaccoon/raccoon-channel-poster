@@ -19,7 +19,6 @@ def test_create_router_does_not_import_main():
     router = create_router(
         db=DummyDB(),
         bot=DummyBot(),
-        channel_id="@dummy",
         interval_hours=3,
         timezone_name="Europe/Moscow",
         notifier=BatchNotifier(DummyDB(), enabled=False, delay=0),

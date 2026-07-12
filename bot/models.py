@@ -25,3 +25,10 @@ class QueueItem:
     last_error: str | None
     created_at: str
     published_at: str | None
+
+
+@dataclass(frozen=True)
+class ChannelSettings:
+    channel_id: int
+    channel_username: str | None
+    channel_title: str | None

@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .models import QueueItem
+from .models import ChannelSettings, QueueItem
 
 
 def utcnow() -> str:
@@ -53,6 +53,10 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS idx_queue_fifo ON queue_items(status, created_at, source_message_id, id);
                 CREATE TABLE IF NOT EXISTS bot_state (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                );
+                CREATE TABLE IF NOT EXISTS bot_settings (
                     key TEXT PRIMARY KEY,
                     value TEXT
                 );
@@ -136,3 +140,32 @@ class Database:
 
     async def set_paused(self, paused:bool) -> None:
         await self.set_state("paused", "true" if paused else "false")
+
+    async def get_channel(self) -> ChannelSettings | None:
+        async with self.connect() as db:
+            cur = await db.execute("SELECT key, value FROM bot_settings WHERE key IN ('channel_id', 'channel_username', 'channel_title')")
+            values = {row["key"]: row["value"] for row in await cur.fetchall()}
+        if not values.get("channel_id"):
+            return None
+        return ChannelSettings(
+            channel_id=int(values["channel_id"]),
+            channel_username=values.get("channel_username") or None,
+            channel_title=values.get("channel_title") or None,
+        )
+
+    async def set_channel(self, channel: ChannelSettings) -> None:
+        async with self.connect() as db:
+            await db.executemany(
+                "INSERT OR REPLACE INTO bot_settings(key, value) VALUES(?, ?)",
+                [
+                    ("channel_id", str(channel.channel_id)),
+                    ("channel_username", channel.channel_username or ""),
+                    ("channel_title", channel.channel_title or ""),
+                ],
+            )
+            await db.commit()
+
+    async def remove_channel(self) -> None:
+        async with self.connect() as db:
+            await db.execute("DELETE FROM bot_settings WHERE key IN ('channel_id', 'channel_username', 'channel_title')")
+            await db.commit()
