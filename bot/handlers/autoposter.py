@@ -1,11 +1,10 @@
 from __future__ import annotations
 import asyncio
-from collections import defaultdict
 from aiogram import F, Router, Bot
 from aiogram.filters import Command
 from aiogram.types import Message
 from bot.config import Config
-from bot.database import clear_queue, enqueue_media, get_state, queue_count, recover_publishing, set_state, skip_next
+from bot.database import clear_queue, enqueue_media, get_state, queue_count, set_state, skip_next
 from bot.publisher import next_time, publish_next
 
 router = Router()

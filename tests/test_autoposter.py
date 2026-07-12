@@ -49,7 +49,7 @@ class FakeBot:
 def test_next_and_network_error_requeues(tmp_path):
     async def scenario():
         db = tmp_path/'bot.db'; await init_db(str(db))
-        cfg = Config('token', '@ch', [1], 3, str(db), 'Europe/Moscow', False, '', 30, False, 5, 'INFO')
+        cfg = Config('token', '@ch', [1], 3, str(db), False, '', 30, False, 5, 'INFO')
         await enqueue_media(str(db), 'photo', 'file', 'cap', 1, 1, None)
         assert not await publish_next(FakeBot(fail=True), cfg)
         assert await queue_count(str(db)) == 1
@@ -70,7 +70,7 @@ def test_recover_publishing(tmp_path):
     run(scenario())
 
 def test_proxy_session_enabled():
-    cfg = Config('token', '@ch', [1], 3, 'data/bot.db', 'Europe/Moscow', True, 'socks5h://127.0.0.1:1080', 30, True, 5, 'INFO')
+    cfg = Config('token', '@ch', [1], 3, 'data/bot.db', True, 'socks5h://127.0.0.1:1080', 30, True, 5, 'INFO')
     session = build_session(cfg)
     assert session.proxy == 'socks5://127.0.0.1:1080'
     assert session.raccoon_original_proxy_url == 'socks5h://127.0.0.1:1080'

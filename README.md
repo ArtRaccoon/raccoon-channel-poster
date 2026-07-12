@@ -1,43 +1,48 @@
-# Telegram Channel Poster
+# Raccoon Channel Autoposter
 
-Автоматический Telegram-бот для ведения канала: администратор отправляет в личку боту много медиа, бот молча сохраняет их в постоянную SQLite-очередь и публикует по одному посту раз в 3 часа.
+Минималистичный автопостер для одного Telegram-канала. Администраторы отправляют боту медиа в личные сообщения, бот сохраняет их в SQLite-очередь и автоматически публикует по одному элементу через заданный интервал.
 
-## Возможности
+## Что осталось в проекте
 
-- Поддерживает `photo`, `video`, `animation` и изображения, отправленные как `document`.
-- Альбомы Telegram не публикуются альбомами: каждый элемент сохраняется отдельным FIFO-постом.
-- Очередь переживает рестарт и падение прокси.
-- При старте элемент со статусом `publishing` возвращается в `queued`.
-- После простоя публикуется максимум один пост, затем снова ожидание интервала.
-- Все запросы к Telegram идут через SOCKS5 при `PROXY_ENABLED=true`.
-- Нет кнопок, предпросмотра и подтверждений после каждого файла.
+- Приём `photo`, `video`, `animation` и изображений, отправленных как `document`.
+- Постоянная FIFO-очередь в SQLite.
+- Восстановление элементов со статусом `publishing` после рестарта.
+- Автопубликация по интервалу и ручная публикация следующего элемента.
+- Пауза, возобновление, пропуск и очистка очереди.
+- SOCKS5/SOCKS5H-прокси для совместимости с локальным sing-box.
+- systemd-unit для серверного запуска.
 
-## Создание бота
+В репозитории нет редактора каналов, FSM-сценариев, клавиатур, черновиков, пакетных публикаций, расписаний старого бота и других legacy-модулей.
 
-1. Откройте [@BotFather](https://t.me/BotFather).
-2. Выполните `/newbot` и сохраните токен в `BOT_TOKEN`.
-3. Добавьте бота администратором в целевой канал с правом публикации сообщений.
+## Структура
 
-## TARGET_CHANNEL_ID
+```text
+bot/
+  main.py              # точка входа, запуск polling и фонового автопостера
+  config.py            # чтение .env
+  proxy.py             # aiohttp/aiogram-сессия с SOCKS5/SOCKS5H
+  database.py          # SQLite-схема и операции очереди
+  publisher.py         # публикация и фоновый цикл
+  caption.py           # HTML-caption и блок ссылок
+  handlers/
+    autoposter.py      # команды и приём медиа
+```
 
-- Для публичного канала можно указать `@username`.
-- Для приватного канала используйте числовой id вида `-1001234567890`. Его можно получить через служебных ботов или временно переслав сообщение из канала в бота, который показывает chat id.
+## Создание и настройка бота
 
-## ADMIN_IDS
+1. Создайте бота через [@BotFather](https://t.me/BotFather) и сохраните токен в `BOT_TOKEN`.
+2. Добавьте бота администратором в целевой канал с правом публикации сообщений.
+3. Получите Telegram ID администраторов через [@userinfobot](https://t.me/userinfobot) или аналогичный бот.
+4. Заполните `.env`.
 
-Напишите [@userinfobot](https://t.me/userinfobot) или аналогичному боту и скопируйте свой числовой Telegram id. Несколько администраторов указываются через запятую.
-
-## Настройка `.env`
-
-Скопируйте `.env.example` в `.env` и заполните значения:
+## Переменные окружения
 
 ```env
 BOT_TOKEN=123456:token
 TARGET_CHANNEL_ID=@your_channel
-ADMIN_IDS=123456789
+ADMIN_IDS=123456789,987654321
 POST_INTERVAL_HOURS=3
 DATABASE_PATH=data/bot.db
-TIMEZONE=Europe/Moscow
 PROXY_ENABLED=true
 PROXY_URL=socks5h://127.0.0.1:1080
 PROXY_CONNECT_TIMEOUT_SECONDS=30
@@ -46,7 +51,21 @@ BATCH_NOTIFICATION_DELAY_SECONDS=5
 LOG_LEVEL=INFO
 ```
 
-`PROXY_URL` поддерживает `socks5://` и `socks5h://`. Для локального sing-box обычно используется `socks5h://127.0.0.1:1080`.
+### `TARGET_CHANNEL_ID`
+
+- Для публичного канала укажите `@username`.
+- Для приватного канала укажите числовой ID вида `-1001234567890`.
+
+### Прокси и sing-box
+
+`PROXY_URL` поддерживает схемы `socks5://` и `socks5h://`. Для локального sing-box обычно подходит:
+
+```env
+PROXY_ENABLED=true
+PROXY_URL=socks5h://127.0.0.1:1080
+```
+
+`aiogram` принимает SOCKS-прокси через `aiohttp-socks`; `socks5h://` сохраняется как исходная настройка и передаётся в сессию как совместимый `socks5://` URL.
 
 ## Локальный запуск
 
@@ -59,14 +78,7 @@ python -m bot.main
 
 ## systemd
 
-Пример unit-файла находится в `systemd/raccoon-channel-poster.service` и запускается после `raccoon-sing-box.service`:
-
-```ini
-After=network-online.target raccoon-sing-box.service
-Requires=raccoon-sing-box.service
-```
-
-Установка:
+Unit-файл находится в `systemd/raccoon-channel-poster.service`. Он рассчитан на установку проекта в `/opt/raccoon-channel-poster` и запуск после `raccoon-sing-box.service`.
 
 ```bash
 sudo cp systemd/raccoon-channel-poster.service /etc/systemd/system/
@@ -75,25 +87,36 @@ sudo systemctl enable --now raccoon-channel-poster.service
 journalctl -u raccoon-channel-poster.service -f
 ```
 
-## Команды
+Если sing-box не используется, уберите из unit-файла строки `After=... raccoon-sing-box.service` и `Requires=raccoon-sing-box.service` либо оставьте только `After=network-online.target`.
+
+## Команды администратора
 
 - `/start` — краткая инструкция.
-- `/status` — статус публикации, размер очереди, следующий запуск, последний успешный пост.
+- `/help` — список команд.
+- `/status` — состояние публикации, размер очереди, следующий запуск и последний успешный пост.
 - `/queue` — размер очереди и примерный запас в днях.
 - `/pause` — приостановить автопубликацию.
 - `/resume` — возобновить автопубликацию.
-- `/next` — немедленно опубликовать следующий пост и перенести следующий автозапуск на интервал.
-- `/skip` — пропустить следующий элемент.
-- `/clear confirm` — очистить очередь.
-- `/help` — список команд.
+- `/next` — немедленно опубликовать следующий элемент и пересчитать следующий автозапуск.
+- `/skip` — пропустить следующий элемент очереди.
+- `/clear confirm` — пометить текущую очередь как пропущенную.
 
-## Резервное копирование SQLite
+## SQLite
+
+Используются только две таблицы:
+
+- `queue_items` — элементы очереди и история статусов.
+- `bot_state` — служебные флаги (`paused`, `next_run_at`, `last_success_at`).
+
+При инициализации база удаляет таблицы старого Telegram-бота, если они остались после миграции: `users`, `channels`, `posts`, `post_batches`, `channel_schedules`, `publish_logs`, `edit_logs`.
+
+### Резервное копирование
 
 ```bash
 sqlite3 data/bot.db ".backup 'backup/bot-$(date +%F).db'"
 ```
 
-Перед восстановлением остановите сервис:
+Восстановление:
 
 ```bash
 sudo systemctl stop raccoon-channel-poster.service
@@ -105,4 +128,5 @@ sudo systemctl start raccoon-channel-poster.service
 
 ```bash
 pytest
+python -m compileall bot tests
 ```
