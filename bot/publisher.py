@@ -5,7 +5,7 @@ import logging
 from aiogram import Bot
 from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter, TelegramAPIError
 from .captions import build_caption
-from .database import Database
+from .database import Database, utcnow
 from .models import QueueItem
 
 BACKOFFS = [5, 15, 30, 60, 120, 300]
@@ -45,7 +45,7 @@ async def publish_next(db: Database, bot: Bot, channel_id: str|int) -> bool:
         await db.release_failed(item.id, str(exc))
         raise TemporaryPublishError(str(exc)) from exc
     await db.mark_published(item.id)
-    await db.set_state("last_success_at", __import__('bot.database').database.utcnow())
+    await db.set_state("last_success_at", utcnow())
     await db.set_state("last_error", "")
     log.info("Published queue item %s", item.id)
     return True

@@ -8,6 +8,7 @@
 
 - SQLite-база `data/autoposter.db` для очереди, состояния и настройки канала.
 - Поддержка `photo`, `video`, `animation`, изображений как `document`.
+- Альбомы (`media_group`) сейчас сохраняются как отдельные элементы очереди и публикуются по одному media item; публикация целых альбомов будет отдельным PR.
 - Массовая загрузка 100+ медиа без кнопок и предпросмотра.
 - Агрегированное уведомление о пачке после короткой паузы.
 - SOCKS5/SOCKS5H-прокси для всех запросов к Telegram.
@@ -134,14 +135,20 @@ sudo systemctl status raccoon-channel-poster.service --no-pager -l
 - `/clear` — предупреждение.
 - `/clear confirm` — пометить все `queued` и `publishing` элементы как `skipped`.
 
-## 10. Резервное копирование базы
+## 10. Текущие ограничения
+
+- `media_group`/альбомы сейчас сохраняются как отдельные элементы очереди.
+- Публикация всегда идёт по одному media item.
+- Публикация целых альбомов с сохранением группировки будет отдельным PR.
+
+## 11. Резервное копирование базы
 
 ```bash
 cd /home/postingbot/bots/raccoon-channel-poster
 sqlite3 data/autoposter.db ".backup 'data/autoposter.backup.db'"
 ```
 
-## 11. Восстановление
+## 12. Восстановление
 
 ```bash
 sudo systemctl stop raccoon-channel-poster.service
@@ -150,7 +157,7 @@ cp data/autoposter.backup.db data/autoposter.db
 sudo systemctl start raccoon-channel-poster.service
 ```
 
-## 12. Обновление проекта
+## 13. Обновление проекта
 
 ```bash
 cd /home/postingbot/bots/raccoon-channel-poster
