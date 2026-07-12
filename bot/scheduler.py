@@ -14,8 +14,8 @@ def parse_dt(value: str) -> datetime | None:
     except ValueError: return None
 
 class Scheduler:
-    def __init__(self, db:Database, bot:Bot, channel_id:str|int, interval_hours:float):
-        self.db=db; self.bot=bot; self.channel_id=channel_id; self.interval=timedelta(hours=interval_hours); self._stop=asyncio.Event(); self._task=None
+    def __init__(self, db:Database, bot:Bot, interval_hours:float):
+        self.db=db; self.bot=bot; self.interval=timedelta(hours=interval_hours); self._stop=asyncio.Event(); self._task=None
     async def ensure_next_run(self):
         if not await self.db.get_state("next_run_at"):
             await self.db.set_state("next_run_at", (datetime.now(timezone.utc)+self.interval).isoformat())
@@ -30,11 +30,14 @@ class Scheduler:
             try:
                 if await self.db.paused():
                     await asyncio.wait_for(self._stop.wait(), 5); continue
+                channel = await self.db.get_channel()
+                if channel is None:
+                    await asyncio.wait_for(self._stop.wait(), 1); continue
                 due=parse_dt(await self.db.get_state("next_run_at")) or datetime.now(timezone.utc)
                 wait=max(0,(due-datetime.now(timezone.utc)).total_seconds())
                 if wait: await asyncio.wait_for(self._stop.wait(), min(wait,60)); continue
                 try:
-                    await publish_next(self.db, self.bot, self.channel_id)
+                    await publish_next(self.db, self.bot, channel.channel_id)
                     backoff_index=0
                     await self.db.set_state("next_run_at", (datetime.now(timezone.utc)+self.interval).isoformat())
                 except TemporaryPublishError as exc:

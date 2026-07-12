@@ -30,8 +30,8 @@ async def main() -> None:
     bot=Bot(config.bot_token, session=session)
     dp=Dispatcher()
     notifier=BatchNotifier(db, config.batch_notification_enabled, config.batch_notification_delay_seconds)
-    dp.include_router(create_router(db, bot, config.target_channel_id, config.post_interval_hours, config.timezone, notifier, config.admin_ids))
-    scheduler=Scheduler(db, bot, config.target_channel_id, config.post_interval_hours)
+    dp.include_router(create_router(db, bot, config.post_interval_hours, config.timezone, notifier, config.admin_ids))
+    scheduler=Scheduler(db, bot, config.post_interval_hours)
     await scheduler.start()
     stop=asyncio.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):

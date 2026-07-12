@@ -33,22 +33,10 @@ def parse_admin_ids(raw: str) -> set[int]:
     return ids
 
 
-def parse_channel_id(raw: str) -> str | int:
-    value = raw.strip()
-    if not value:
-        raise ConfigError("TARGET_CHANNEL_ID is required")
-    if value.startswith("@"):
-        return value
-    try:
-        return int(value)
-    except ValueError as exc:
-        raise ConfigError("TARGET_CHANNEL_ID must be @channel_name or numeric id like -1001234567890") from exc
-
 
 @dataclass(frozen=True)
 class Config:
     bot_token: str
-    target_channel_id: str | int
     admin_ids: set[int]
     post_interval_hours: float = 3
     database_path: str = "data/autoposter.db"
@@ -65,9 +53,8 @@ class Config:
         if env_file:
             load_dotenv(env_file)
         token = os.getenv("BOT_TOKEN", "").strip()
-        channel = os.getenv("TARGET_CHANNEL_ID", "").strip()
         admins = os.getenv("ADMIN_IDS", "").strip()
-        missing = [name for name, value in (("BOT_TOKEN", token), ("TARGET_CHANNEL_ID", channel), ("ADMIN_IDS", admins)) if not value]
+        missing = [name for name, value in (("BOT_TOKEN", token), ("ADMIN_IDS", admins)) if not value]
         if missing:
             raise ConfigError("Missing required environment variables: " + ", ".join(missing))
         proxy_enabled = _bool(os.getenv("PROXY_ENABLED"), True)
@@ -78,7 +65,6 @@ class Config:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         return cls(
             bot_token=token,
-            target_channel_id=parse_channel_id(channel),
             admin_ids=parse_admin_ids(admins),
             post_interval_hours=float(os.getenv("POST_INTERVAL_HOURS", "3")),
             database_path=db_path,

@@ -9,6 +9,7 @@ from aiogram import Bot, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 from .database import Database
+from .models import ChannelSettings
 from .publisher import TemporaryPublishError, publish_next
 
 log=logging.getLogger(__name__)
@@ -43,7 +44,41 @@ def format_time(value:str, tzname:str) -> str:
     try: return datetime.fromisoformat(value).astimezone(ZoneInfo(tzname)).strftime("%Y-%m-%d %H:%M:%S %Z")
     except Exception: return value
 
-def create_router(db:Database, bot:Bot, channel_id:str|int, interval_hours:float, timezone_name:str, notifier:BatchNotifier, admin_ids: Collection[int]) -> Router:
+SETCHANNEL_STATE = "awaiting_setchannel_admin_id"
+
+def _channel_from_forward(message: Message) -> ChannelSettings | None:
+    chat = getattr(message, "forward_from_chat", None)
+    if chat is None:
+        origin = getattr(message, "forward_origin", None)
+        chat = getattr(origin, "chat", None)
+    if chat is None or getattr(chat, "type", None) != "channel":
+        return None
+    return ChannelSettings(channel_id=chat.id, channel_username=getattr(chat, "username", None), channel_title=getattr(chat, "title", None))
+
+async def _channel_from_username(bot: Bot, text: str) -> ChannelSettings | None:
+    username = text.strip()
+    if not username.startswith("@") or len(username) < 2 or any(ch.isspace() for ch in username):
+        return None
+    chat = await bot.get_chat(username)
+    if getattr(chat, "type", None) != "channel":
+        return None
+    return ChannelSettings(channel_id=chat.id, channel_username=getattr(chat, "username", None), channel_title=getattr(chat, "title", None))
+
+async def _bot_can_post(bot: Bot, channel_id: int) -> bool:
+    me = await bot.get_me()
+    member = await bot.get_chat_member(channel_id, me.id)
+    return getattr(member, "status", None) == "administrator" and bool(getattr(member, "can_post_messages", False))
+
+def _format_channel(channel: ChannelSettings, interval_hours: float | None = None, queued: int | None = None) -> str:
+    username = f"@{channel.channel_username}" if channel.channel_username and not channel.channel_username.startswith("@") else (channel.channel_username or "—")
+    lines = ["Название:", channel.channel_title or "—", "", "Username:", username, "", "ID:", str(channel.channel_id)]
+    if interval_hours is not None:
+        lines += ["", "Интервал публикации:", f"{interval_hours:g} ч."]
+    if queued is not None:
+        lines += ["", "Размер очереди:", str(queued)]
+    return "\n".join(lines)
+
+def create_router(db:Database, bot:Bot, interval_hours:float, timezone_name:str, notifier:BatchNotifier, admin_ids: Collection[int]) -> Router:
     router=Router()
     async def auth(message:Message) -> bool:
         if message.from_user and message.from_user.id in admin_ids: return True
@@ -52,12 +87,37 @@ def create_router(db:Database, bot:Bot, channel_id:str|int, interval_hours:float
     @router.message(Command("start"))
     async def start(message:Message):
         if not await auth(message): return
+        if not await db.get_channel():
+            await message.answer("Канал пока не настроен.\n\nДобавьте меня администратором канала.\n\nПосле этого:\n\n• перешлите любое сообщение из канала\n\nили\n\n• отправьте @username канала.")
+            return
         await message.answer("Отправляйте медиа — оно автоматически добавляется в очередь. Публикация идёт каждые 3 часа.")
 
     @router.message(Command("help"))
     async def help_cmd(message:Message):
         if not await auth(message): return
-        await message.answer("/start /help /status /queue /pause /resume /next /skip /clear confirm")
+        await message.answer("/start /help /status /channel /setchannel /removechannel /queue /pause /resume /next /skip /clear confirm")
+
+    @router.message(Command("setchannel"))
+    async def setchannel(message:Message):
+        if not await auth(message): return
+        await db.set_state(SETCHANNEL_STATE, str(message.from_user.id))
+        await message.answer("Перешлите любое сообщение из канала или отправьте @username канала.")
+
+    @router.message(Command("channel"))
+    async def channel(message:Message):
+        if not await auth(message): return
+        channel_settings = await db.get_channel()
+        if not channel_settings:
+            await message.answer("Канал пока не настроен.")
+            return
+        await message.answer(_format_channel(channel_settings, interval_hours, await db.count_queued()))
+
+    @router.message(Command("removechannel"))
+    async def removechannel(message:Message):
+        if not await auth(message): return
+        await db.remove_channel()
+        await db.set_state(SETCHANNEL_STATE, "")
+        await message.answer("Канал удалён. Очередь сохранена.")
 
     @router.message(Command("status"))
     async def status(message:Message):
@@ -85,8 +145,12 @@ def create_router(db:Database, bot:Bot, channel_id:str|int, interval_hours:float
     async def next_cmd(message:Message):
         if not await auth(message): return
         was_paused=await db.paused()
+        channel_settings = await db.get_channel()
+        if not channel_settings:
+            await message.answer("Канал пока не настроен.")
+            return
         try:
-            ok=await publish_next(db, bot, channel_id)
+            ok=await publish_next(db, bot, channel_settings.channel_id)
         except TemporaryPublishError as exc:
             await message.answer(f"Временная ошибка публикации: {exc}"); return
         if ok and not was_paused:
@@ -109,6 +173,23 @@ def create_router(db:Database, bot:Bot, channel_id:str|int, interval_hours:float
     @router.message()
     async def media(message:Message):
         if not await auth(message): return
+        awaiting = await db.get_state(SETCHANNEL_STATE)
+        channel_settings = _channel_from_forward(message)
+        if awaiting == str(message.from_user.id) or channel_settings or (message.text or "").strip().startswith("@"):
+            if channel_settings is None:
+                try:
+                    channel_settings = await _channel_from_username(bot, message.text or "")
+                except Exception as exc:
+                    log.warning("Failed to resolve channel username: %s", exc)
+                    await message.answer("Не удалось получить канал. Проверьте @username и права доступа."); return
+            if channel_settings is None:
+                await message.answer("Перешлите сообщение из канала или отправьте @username канала."); return
+            if not await _bot_can_post(bot, channel_settings.channel_id):
+                await message.answer("❌\n\nДобавьте меня администратором\nс правом публикации сообщений."); return
+            await db.set_channel(channel_settings)
+            await db.set_state(SETCHANNEL_STATE, "")
+            await message.answer("✅ Канал успешно подключён.\n\n" + _format_channel(channel_settings))
+            return
         payload=media_payload(message)
         if not payload:
             await message.answer("Неподдерживаемый тип файла."); return
