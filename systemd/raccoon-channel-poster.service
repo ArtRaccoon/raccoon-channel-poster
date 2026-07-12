@@ -1,0 +1,15 @@
+[Unit]
+Description=Raccoon Telegram Channel Autoposter
+After=network-online.target raccoon-sing-box.service
+Requires=raccoon-sing-box.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/raccoon-channel-poster
+EnvironmentFile=/opt/raccoon-channel-poster/.env
+ExecStart=/opt/raccoon-channel-poster/.venv/bin/python -m bot.main
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
