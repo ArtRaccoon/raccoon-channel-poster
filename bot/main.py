@@ -9,32 +9,29 @@ from .handlers import BatchNotifier, create_router
 from .proxy import create_session, safe_proxy_url
 from .scheduler import Scheduler
 
-CONFIG: Config
-
 
 def setup_logging(level:str) -> None:
     Path("logs").mkdir(exist_ok=True)
     logging.basicConfig(level=getattr(logging, level, logging.INFO), format="%(asctime)s %(levelname)s %(name)s: %(message)s", handlers=[logging.StreamHandler(sys.stdout), logging.FileHandler("logs/bot.log")])
 
 async def main() -> None:
-    global CONFIG
     try:
-        CONFIG = Config.from_env()
+        config = Config.from_env()
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr); raise SystemExit(2) from exc
-    setup_logging(CONFIG.log_level)
+    setup_logging(config.log_level)
     log=logging.getLogger(__name__)
     log.info("Starting autoposter")
-    if CONFIG.proxy_enabled: log.info("Telegram proxy enabled: %s", safe_proxy_url(CONFIG.proxy_url))
+    if config.proxy_enabled: log.info("Telegram proxy enabled: %s", safe_proxy_url(config.proxy_url))
     else: log.info("Telegram proxy disabled")
-    db=Database(CONFIG.database_path); await db.init(); restored=await db.restore_publishing()
+    db=Database(config.database_path); await db.init(); restored=await db.restore_publishing()
     if restored: log.info("Restored publishing items: %s", restored)
-    session=create_session(CONFIG.proxy_enabled, CONFIG.proxy_url, CONFIG.proxy_connect_timeout_seconds)
-    bot=Bot(CONFIG.bot_token, session=session)
+    session=create_session(config.proxy_enabled, config.proxy_url, config.proxy_connect_timeout_seconds)
+    bot=Bot(config.bot_token, session=session)
     dp=Dispatcher()
-    notifier=BatchNotifier(db, CONFIG.batch_notification_enabled, CONFIG.batch_notification_delay_seconds)
-    dp.include_router(create_router(db, bot, CONFIG.target_channel_id, CONFIG.post_interval_hours, CONFIG.timezone, notifier))
-    scheduler=Scheduler(db, bot, CONFIG.target_channel_id, CONFIG.post_interval_hours)
+    notifier=BatchNotifier(db, config.batch_notification_enabled, config.batch_notification_delay_seconds)
+    dp.include_router(create_router(db, bot, config.target_channel_id, config.post_interval_hours, config.timezone, notifier, config.admin_ids))
+    scheduler=Scheduler(db, bot, config.target_channel_id, config.post_interval_hours)
     await scheduler.start()
     stop=asyncio.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):

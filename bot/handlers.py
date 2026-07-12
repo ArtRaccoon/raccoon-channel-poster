@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio, logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from aiogram import Bot, Router, F
+from collections.abc import Collection
+
+from aiogram import Bot, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 from .database import Database
@@ -41,11 +43,10 @@ def format_time(value:str, tzname:str) -> str:
     try: return datetime.fromisoformat(value).astimezone(ZoneInfo(tzname)).strftime("%Y-%m-%d %H:%M:%S %Z")
     except Exception: return value
 
-def create_router(db:Database, bot:Bot, channel_id:str|int, interval_hours:float, timezone_name:str, notifier:BatchNotifier) -> Router:
+def create_router(db:Database, bot:Bot, channel_id:str|int, interval_hours:float, timezone_name:str, notifier:BatchNotifier, admin_ids: Collection[int]) -> Router:
     router=Router()
     async def auth(message:Message) -> bool:
-        from .main import CONFIG
-        if message.from_user and message.from_user.id in CONFIG.admin_ids: return True
+        if message.from_user and message.from_user.id in admin_ids: return True
         await message.answer("Нет доступа."); return False
 
     @router.message(Command("start"))
