@@ -1,56 +1,92 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
-from typing import List
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Self
+
 from dotenv import load_dotenv
 
-load_dotenv()
+
+class ConfigError(RuntimeError):
+    pass
 
 
-def _parse_ids(raw: str) -> List[int]:
-    return [int(x.strip()) for x in raw.replace(';', ',').split(',') if x.strip()]
-
-
-def _bool(name: str, default: bool) -> bool:
-    val = os.getenv(name)
-    if val is None:
+def _bool(value: str | None, default: bool) -> bool:
+    if value is None or value == "":
         return default
-    return val.strip().lower() in {'1', 'true', 'yes', 'on'}
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
-@dataclass(slots=True)
+def parse_admin_ids(raw: str) -> set[int]:
+    ids: set[int] = set()
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            ids.add(int(part))
+        except ValueError as exc:
+            raise ConfigError(f"ADMIN_IDS contains non-numeric value: {part!r}") from exc
+    if not ids:
+        raise ConfigError("ADMIN_IDS must contain at least one Telegram user id")
+    return ids
+
+
+def parse_channel_id(raw: str) -> str | int:
+    value = raw.strip()
+    if not value:
+        raise ConfigError("TARGET_CHANNEL_ID is required")
+    if value.startswith("@"):
+        return value
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ConfigError("TARGET_CHANNEL_ID must be @channel_name or numeric id like -1001234567890") from exc
+
+
+@dataclass(frozen=True)
 class Config:
     bot_token: str
-    target_channel_id: str
-    admin_ids: List[int]
-    post_interval_hours: float
-    database_path: str
-    timezone: str
-    proxy_enabled: bool
-    proxy_url: str
-    proxy_connect_timeout_seconds: int
-    batch_notification_enabled: bool
-    batch_notification_delay_seconds: float
-    log_level: str
+    target_channel_id: str | int
+    admin_ids: set[int]
+    post_interval_hours: float = 3
+    database_path: str = "data/autoposter.db"
+    timezone: str = "Europe/Moscow"
+    proxy_enabled: bool = True
+    proxy_url: str = "socks5h://127.0.0.1:1080"
+    proxy_connect_timeout_seconds: float = 30
+    batch_notification_enabled: bool = True
+    batch_notification_delay_seconds: float = 5
+    log_level: str = "INFO"
 
-    @property
-    def post_interval_seconds(self) -> float:
-        return self.post_interval_hours * 3600
-
-
-def load_config() -> Config:
-    return Config(
-        bot_token=os.getenv('BOT_TOKEN', ''),
-        target_channel_id=os.getenv('TARGET_CHANNEL_ID', ''),
-        admin_ids=_parse_ids(os.getenv('ADMIN_IDS', os.getenv('OWNER_IDS', ''))),
-        post_interval_hours=float(os.getenv('POST_INTERVAL_HOURS', '3')),
-        database_path=os.getenv('DATABASE_PATH', 'data/bot.db'),
-        timezone=os.getenv('TIMEZONE', 'Europe/Moscow'),
-        proxy_enabled=_bool('PROXY_ENABLED', False),
-        proxy_url=os.getenv('PROXY_URL', 'socks5h://127.0.0.1:1080'),
-        proxy_connect_timeout_seconds=int(os.getenv('PROXY_CONNECT_TIMEOUT_SECONDS', '30')),
-        batch_notification_enabled=_bool('BATCH_NOTIFICATION_ENABLED', True),
-        batch_notification_delay_seconds=float(os.getenv('BATCH_NOTIFICATION_DELAY_SECONDS', '5')),
-        log_level=os.getenv('LOG_LEVEL', 'INFO').upper(),
-    )
+    @classmethod
+    def from_env(cls, env_file: str | os.PathLike[str] | None = ".env") -> Self:
+        if env_file:
+            load_dotenv(env_file)
+        token = os.getenv("BOT_TOKEN", "").strip()
+        channel = os.getenv("TARGET_CHANNEL_ID", "").strip()
+        admins = os.getenv("ADMIN_IDS", "").strip()
+        missing = [name for name, value in (("BOT_TOKEN", token), ("TARGET_CHANNEL_ID", channel), ("ADMIN_IDS", admins)) if not value]
+        if missing:
+            raise ConfigError("Missing required environment variables: " + ", ".join(missing))
+        proxy_enabled = _bool(os.getenv("PROXY_ENABLED"), True)
+        proxy_url = os.getenv("PROXY_URL", "socks5h://127.0.0.1:1080").strip()
+        if proxy_enabled and not (proxy_url.startswith("socks5://") or proxy_url.startswith("socks5h://")):
+            raise ConfigError("PROXY_URL must start with socks5:// or socks5h://")
+        db_path = os.getenv("DATABASE_PATH", "data/autoposter.db").strip() or "data/autoposter.db"
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        return cls(
+            bot_token=token,
+            target_channel_id=parse_channel_id(channel),
+            admin_ids=parse_admin_ids(admins),
+            post_interval_hours=float(os.getenv("POST_INTERVAL_HOURS", "3")),
+            database_path=db_path,
+            timezone=os.getenv("TIMEZONE", "Europe/Moscow").strip() or "Europe/Moscow",
+            proxy_enabled=proxy_enabled,
+            proxy_url=proxy_url,
+            proxy_connect_timeout_seconds=float(os.getenv("PROXY_CONNECT_TIMEOUT_SECONDS", "30")),
+            batch_notification_enabled=_bool(os.getenv("BATCH_NOTIFICATION_ENABLED"), True),
+            batch_notification_delay_seconds=float(os.getenv("BATCH_NOTIFICATION_DELAY_SECONDS", "5")),
+            log_level=os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO",
+        )
