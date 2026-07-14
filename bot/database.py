@@ -141,6 +141,41 @@ class Database:
     async def set_paused(self, paused:bool) -> None:
         await self.set_state("paused", "true" if paused else "false")
 
+    async def get_setting(self, key: str) -> str | None:
+        async with self.connect() as db:
+            cur = await db.execute("SELECT value FROM bot_settings WHERE key=?", (key,))
+            row = await cur.fetchone()
+            return row[0] if row else None
+
+    async def set_setting(self, key: str, value: str) -> None:
+        async with self.connect() as db:
+            await db.execute("INSERT OR REPLACE INTO bot_settings(key,value) VALUES(?,?)", (key, value))
+            await db.commit()
+
+    async def get_post_interval_hours(self, default: float) -> float:
+        value = await self.get_setting("post_interval_hours")
+        if value in (None, ""):
+            return default
+        try:
+            return float(value)
+        except ValueError:
+            return default
+
+    async def set_post_interval_hours(self, value: float) -> None:
+        await self.set_setting("post_interval_hours", f"{value:g}")
+
+    async def get_links_block(self, default: str) -> str:
+        value = await self.get_setting("links_block")
+        return default if value is None else value
+
+    async def set_links_block(self, value: str) -> None:
+        await self.set_setting("links_block", value)
+
+    async def reset_links_block(self) -> None:
+        async with self.connect() as db:
+            await db.execute("DELETE FROM bot_settings WHERE key='links_block'")
+            await db.commit()
+
     async def get_channel(self) -> ChannelSettings | None:
         async with self.connect() as db:
             cur = await db.execute("SELECT key, value FROM bot_settings WHERE key IN ('channel_id', 'channel_username', 'channel_title')")
