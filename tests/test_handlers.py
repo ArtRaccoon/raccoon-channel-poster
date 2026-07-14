@@ -2,7 +2,7 @@ import sys
 
 from aiogram import Router
 
-from bot.handlers import BatchNotifier, create_router, main_menu_keyboard, clear_confirm_keyboard
+from bot.handlers import BatchNotifier, create_router, main_menu_keyboard, clear_confirm_keyboard, parse_interval_value
 
 
 class DummyDB:
@@ -35,6 +35,7 @@ def test_admin_menu_keyboards_contain_expected_buttons():
         ["📊 Статус", "📚 Очередь"],
         ["▶️ Опубликовать сейчас"],
         ["⏸ Пауза", "▶️ Продолжить"],
+        ["⏱ Интервал", "🔗 Ссылки"],
         ["⚙️ Канал", "🔗 Настроить канал"],
         ["🗑 Очистить очередь"],
         ["❓ Помощь"],
@@ -47,3 +48,11 @@ def test_clear_confirm_keyboard_contains_confirmation_buttons():
         ["✅ Да, очистить очередь"],
         ["❌ Отмена"],
     ]
+
+
+def test_setinterval_parsing_supports_comma_and_range():
+    assert parse_interval_value("0,5") == 0.5
+    assert parse_interval_value("3") == 3
+    assert parse_interval_value("0.24") is None
+    assert parse_interval_value("169") is None
+    assert parse_interval_value("abc") is None

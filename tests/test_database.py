@@ -41,3 +41,17 @@ def test_media_group_order_by_message_id(tmp_path):
         await db.add_many([(1,12,'g','photo','b',None),(1,11,'g','photo','a','cap')])
         assert (await db.claim_next()).source_message_id == 11
     run(scenario())
+
+
+def test_interval_and_links_settings(tmp_path):
+    async def scenario():
+        db=Database(str(tmp_path/'autoposter.db')); await db.init()
+        assert await db.get_post_interval_hours(3) == 3
+        await db.set_post_interval_hours(2.5)
+        assert await db.get_post_interval_hours(3) == 2.5
+        assert await db.get_links_block('default') == 'default'
+        await db.set_links_block('<b>links</b>')
+        assert await db.get_links_block('default') == '<b>links</b>'
+        await db.reset_links_block()
+        assert await db.get_links_block('default') == 'default'
+    run(scenario())

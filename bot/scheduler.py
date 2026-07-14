@@ -15,10 +15,14 @@ def parse_dt(value: str) -> datetime | None:
 
 class Scheduler:
     def __init__(self, db:Database, bot:Bot, interval_hours:float):
-        self.db=db; self.bot=bot; self.interval=timedelta(hours=interval_hours); self._stop=asyncio.Event(); self._task=None
+        self.db=db; self.bot=bot; self.default_interval_hours=interval_hours; self._stop=asyncio.Event(); self._task=None
+    async def current_interval(self) -> timedelta:
+        interval_hours = await self.db.get_post_interval_hours(self.default_interval_hours)
+        return timedelta(hours=interval_hours)
+
     async def ensure_next_run(self):
         if not await self.db.get_state("next_run_at"):
-            await self.db.set_state("next_run_at", (datetime.now(timezone.utc)+self.interval).isoformat())
+            await self.db.set_state("next_run_at", (datetime.now(timezone.utc)+await self.current_interval()).isoformat())
     async def start(self):
         await self.ensure_next_run(); self._task=asyncio.create_task(self.run())
     async def stop(self):
@@ -39,7 +43,7 @@ class Scheduler:
                 try:
                     await publish_next(self.db, self.bot, channel.channel_id)
                     backoff_index=0
-                    await self.db.set_state("next_run_at", (datetime.now(timezone.utc)+self.interval).isoformat())
+                    await self.db.set_state("next_run_at", (datetime.now(timezone.utc)+await self.current_interval()).isoformat())
                 except TemporaryPublishError as exc:
                     delay=max(exc.delay or 0, BACKOFFS[min(backoff_index, len(BACKOFFS)-1)])
                     backoff_index+=1; log.warning("Temporary publish error; retry in %ss: %s", delay, exc)
